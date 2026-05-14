@@ -138,7 +138,7 @@ class DailyPieChart(QtWidgets.QWidget):
         # 沒有數據時顯示無資料訊息
         if not self.data or sum(self.data.values()) == 0:
             painter.setPen(QtGui.QColor(255, 255, 255))
-            painter.setFont(QtGui.QFont('Microsoft JhengHei',18, QtGui.QFont.Bold))
+            painter.setFont(QtGui.QFont('Microsoft JhengHei', 18, QtGui.QFont.Bold))
             
             view_text = {'day': '今日', 'week': '本週', 'month': '本月', 'year': '本年'}.get(self.view_mode, '本期')
             painter.drawText(self.rect(), QtCore.Qt.AlignCenter, f'{view_text}\n暫無統計數據')
@@ -1098,7 +1098,7 @@ class MenuSageWindow(QtWidgets.QMainWindow):
         self.date_prev_btn.setMinimumSize(128, 38)
         self.date_prev_btn.setMaximumWidth(128)
         self.date_prev_btn.setFont(QtGui.QFont('Microsoft JhengHei', 20, QtGui.QFont.Bold))
-        self.date_prev_btn.setStyleSheet('padding: 5px 12px; font-size: 16px; font-weight: 700; background: rgba(0,150,255,80); border: 1px solid rgba(0,150,255,150); color: #fff; border-radius: 7px;')
+        self.date_prev_btn.setStyleSheet('padding: 5px 12px; font-size: 20px; font-weight: 700; background: rgba(0,150,255,80); border: 1px solid rgba(0,150,255,150); color: #fff; border-radius: 7px;')
         nav_row.addWidget(self.date_prev_btn)
 
         self.date_display = QtWidgets.QLabel('今日')
@@ -1110,7 +1110,7 @@ class MenuSageWindow(QtWidgets.QMainWindow):
         self.date_next_btn.setMinimumSize(128, 38)
         self.date_next_btn.setMaximumWidth(128)
         self.date_next_btn.setFont(QtGui.QFont('Microsoft JhengHei', 20, QtGui.QFont.Bold))
-        self.date_next_btn.setStyleSheet('padding: 5px 12px; font-size: 16px; font-weight: 700; background: rgba(0,150,255,80); border: 1px solid rgba(0,150,255,150); color: #fff; border-radius: 7px;')
+        self.date_next_btn.setStyleSheet('padding: 5px 12px; font-size: 20px; font-weight: 700; background: rgba(0,150,255,80); border: 1px solid rgba(0,150,255,150); color: #fff; border-radius: 7px;')
         nav_row.addWidget(self.date_next_btn)
 
         pie_layout.addLayout(nav_row)
