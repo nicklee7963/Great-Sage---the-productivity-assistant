@@ -1,19 +1,23 @@
 import os
 import sys
+import random
+import json
 from pathlib import Path
-
-_venv_root = Path(sys.executable).resolve().parent.parent
-_qt_plugins_path = _venv_root / 'Lib' / 'site-packages' / 'PyQt5' / 'Qt5' / 'plugins'
-_qt_platforms_path = _qt_plugins_path / 'platforms'
-if _qt_platforms_path.exists():
-    os.environ.setdefault('QT_QPA_PLATFORM_PLUGIN_PATH', str(_qt_platforms_path))
-    os.environ.setdefault('QT_PLUGIN_PATH', str(_qt_plugins_path))
+from datetime import datetime
 
 from PyQt5 import QtWidgets, QtCore, QtGui, QtMultimedia
-import random
-import math
-import json
-from datetime import datetime
+
+
+def _configure_qt_plugin_paths():
+    venv_root = Path(sys.executable).resolve().parent.parent
+    qt_plugins_path = venv_root / 'Lib' / 'site-packages' / 'PyQt5' / 'Qt5' / 'plugins'
+    qt_platforms_path = qt_plugins_path / 'platforms'
+    if qt_platforms_path.exists():
+        os.environ.setdefault('QT_QPA_PLATFORM_PLUGIN_PATH', str(qt_platforms_path))
+        os.environ.setdefault('QT_PLUGIN_PATH', str(qt_plugins_path))
+
+
+_configure_qt_plugin_paths()
 
 
 # 活動霓虹色定義（大賢者主題 - 霓虹青藍色系）
@@ -89,6 +93,8 @@ class DailyPieChart(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.data = {}  # {活動名稱: 分鐘數}
+        self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+        self.setMinimumSize(720, 760)
         self.setMinimumHeight(100)  # 最小高度
         self.current_date = datetime.now().date()
         self.view_mode = 'day'
@@ -104,11 +110,35 @@ class DailyPieChart(QtWidgets.QWidget):
     def paintEvent(self, event):
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
+
+        margin_x = 24
+        margin_y = 18
+        inner_rect = self.rect().adjusted(margin_x, margin_y, -margin_x, -margin_y)
+
+        title_height = 34
+        legend_top_gap = 18
+        legend_item_height = 26
+        legend_swatch = 16
+        legend_rows = max(1, sum(1 for value in self.data.values() if value > 0))
+        legend_height = legend_rows * legend_item_height + 10
+
+        available_width = max(1, inner_rect.width())
+        available_height = max(1, inner_rect.height() - title_height - legend_height - legend_top_gap)
+        chart_side = min(available_width, available_height)
+        pie_size = max(180, int(chart_side * 0.75))
+        pie_x = inner_rect.center().x() - pie_size / 2
+        pie_y = inner_rect.top() + title_height + max(0, (available_height - pie_size) / 2)
+        pie_rect = QtCore.QRectF(pie_x, pie_y, pie_size, pie_size)
+
+        legend_start_y = int(pie_rect.bottom() + legend_top_gap)
+        legend_block_width = max(1, int(inner_rect.width() * 0.82))
+        legend_x = int(inner_rect.center().x() - legend_block_width / 2)
+        legend_width = legend_block_width
         
         # 沒有數據時顯示無資料訊息
         if not self.data or sum(self.data.values()) == 0:
-            painter.setPen(QtGui.QColor(100, 200, 255))
-            painter.setFont(QtGui.QFont('Microsoft JhengHei', 18, QtGui.QFont.Bold))
+            painter.setPen(QtGui.QColor(255, 255, 255))
+            painter.setFont(QtGui.QFont('Microsoft JhengHei',18, QtGui.QFont.Bold))
             
             view_text = {'day': '今日', 'week': '本週', 'month': '本月', 'year': '本年'}.get(self.view_mode, '本期')
             painter.drawText(self.rect(), QtCore.Qt.AlignCenter, f'{view_text}\n暫無統計數據')
@@ -116,23 +146,9 @@ class DailyPieChart(QtWidgets.QWidget):
 
         # 繪製日期標題（西元年月日）
         painter.setFont(QtGui.QFont('Microsoft JhengHei', 14, QtGui.QFont.Bold))
-        painter.setPen(QtGui.QColor(255, 255, 255))  # 白色
+        painter.setPen(QtGui.QColor(255, 255, 255))
         date_str = self.current_date.strftime('%Y年%m月%d日')
-        painter.drawText(0, 5, self.width(), 25, QtCore.Qt.AlignCenter, date_str)
-
-        # 計算佈局：左邊圓餅圖，右邊圖例
-        title_height = 30
-        available_height = self.height() - title_height
-        
-        # 右邊圖例預留寬度
-        legend_width = 150
-        pie_area_width = self.width() - legend_width
-        
-        # 圓餅圖直徑 = pie_area_width * 3/4，並限制不超過高度
-        pie_size = min(pie_area_width * 0.75, available_height)
-        pie_x = (pie_area_width - pie_size) / 2
-        pie_y = title_height + (available_height - pie_size) / 2
-        rect = QtCore.QRectF(pie_x, pie_y, pie_size, pie_size)
+        painter.drawText(inner_rect.left(), inner_rect.top(), inner_rect.width(), title_height, QtCore.Qt.AlignCenter, date_str)
 
         # 繪製圓餅圖
         total = sum(self.data.values())
@@ -146,34 +162,31 @@ class DailyPieChart(QtWidgets.QWidget):
 
             painter.setBrush(color)
             painter.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 120), 2))
-            painter.drawPie(rect, int(start_angle), int(angle))
+            painter.drawPie(pie_rect, int(start_angle), int(angle))
 
             start_angle += angle
 
-        # 繪製圖例（右邊，小字體）
-        legend_x = pie_area_width + 10
-        legend_start_y = title_height + 15
-        painter.setFont(QtGui.QFont('Microsoft JhengHei', 9, QtGui.QFont.Bold))
+        # 繪製圖例（下方集中排列）
+        painter.setFont(QtGui.QFont('Microsoft JhengHei', 10, QtGui.QFont.Bold))
 
         sorted_items = sorted(self.data.items(), key=lambda x: x[1], reverse=True)
+        legend_y = legend_start_y
         for idx, (activity, minutes) in enumerate(sorted_items):
             if minutes <= 0:
                 continue
             color = get_neon_color(activity)
 
-            legend_y = int(legend_start_y + idx * 24)
-
-            # 顏色方塊（較小）
+            # 顏色方塊（集中在下方）
             painter.setBrush(color)
             painter.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 200), 1))
-            painter.drawRect(QtCore.QRectF(legend_x, legend_y, 12, 12))
+            painter.drawRect(QtCore.QRectF(legend_x, legend_y + 4, legend_swatch, legend_swatch))
 
-            # 標籤文字（小字體）
+            # 標籤文字
             painter.setPen(QtGui.QColor(255, 255, 255))
-            percentage = (minutes / total) * 100
             label_text = f'{activity} {minutes}m'
-            painter.drawText(int(legend_x + 16), legend_y, 120, 14,
+            painter.drawText(int(legend_x + legend_swatch + 10), legend_y, legend_width - legend_swatch - 10, legend_item_height,
                             QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, label_text)
+            legend_y += legend_item_height
 
 
 
@@ -292,7 +305,6 @@ class SageSpeakingDiamond(QtWidgets.QWidget):
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
         w, h = self.width(), self.height()
-        center = QtCore.QPoint(w // 2, h // 2)
         points = [
             QtCore.QPoint(w // 2, 20),
             QtCore.QPoint(w - 20, h // 2),
@@ -539,7 +551,7 @@ class PomodoroController(QtCore.QObject):
                 if not music_path:
                     # fallback to any mp3 (first value that's not an activity key)
                     for k, v in self._music_map.items():
-                        if not k in ('讀書中', '修習中') and not k.endswith('.mp3'):
+                        if k not in ('讀書中', '修習中') and not k.endswith('.mp3'):
                             continue
                         # if key looks like filename or activity, pick filename entries
                         if k.lower().endswith('.mp3'):
@@ -1072,6 +1084,7 @@ class MenuSageWindow(QtWidgets.QMainWindow):
         # === 圓餅圖面板（含日期導航） - 初始隱藏 ===
         self.pie_container = QtWidgets.QFrame()
         self.pie_container.setStyleSheet('background: rgba(7,16,29,180); border: 1px solid rgba(0,255,200,60); border-radius: 12px;')
+        self.pie_container.setMinimumHeight(860)
         self.pie_container.hide()  # 初始隱藏
         pie_layout = QtWidgets.QVBoxLayout(self.pie_container)
         pie_layout.setContentsMargins(8, 8, 8, 8)  # 減少邊距
@@ -1082,25 +1095,28 @@ class MenuSageWindow(QtWidgets.QMainWindow):
         nav_row.setSpacing(6)
 
         self.date_prev_btn = QtWidgets.QPushButton('◀ 前一天')
-        self.date_prev_btn.setMaximumWidth(100)
-        self.date_prev_btn.setMinimumHeight(28)
-        self.date_prev_btn.setStyleSheet('font-size: 10px; font-weight: 700; background: rgba(0,150,255,80); border: 1px solid rgba(0,150,255,150); color: #fff; border-radius: 6px;')
+        self.date_prev_btn.setMinimumSize(128, 38)
+        self.date_prev_btn.setMaximumWidth(128)
+        self.date_prev_btn.setFont(QtGui.QFont('Microsoft JhengHei', 20, QtGui.QFont.Bold))
+        self.date_prev_btn.setStyleSheet('padding: 5px 12px; font-size: 16px; font-weight: 700; background: rgba(0,150,255,80); border: 1px solid rgba(0,150,255,150); color: #fff; border-radius: 7px;')
         nav_row.addWidget(self.date_prev_btn)
 
         self.date_display = QtWidgets.QLabel('今日')
         self.date_display.setAlignment(QtCore.Qt.AlignCenter)
-        self.date_display.setStyleSheet('font-size: 12px; font-weight: 700; color: #ffffff;')
+        self.date_display.setStyleSheet('font-size: 20px; font-weight: 700; color: #ffffff;')
         nav_row.addWidget(self.date_display, 1)
 
         self.date_next_btn = QtWidgets.QPushButton('後一天 ▶')
-        self.date_next_btn.setMaximumWidth(100)
-        self.date_next_btn.setMinimumHeight(28)
-        self.date_next_btn.setStyleSheet('font-size: 10px; font-weight: 700; background: rgba(0,150,255,80); border: 1px solid rgba(0,150,255,150); color: #fff; border-radius: 6px;')
+        self.date_next_btn.setMinimumSize(128, 38)
+        self.date_next_btn.setMaximumWidth(128)
+        self.date_next_btn.setFont(QtGui.QFont('Microsoft JhengHei', 20, QtGui.QFont.Bold))
+        self.date_next_btn.setStyleSheet('padding: 5px 12px; font-size: 16px; font-weight: 700; background: rgba(0,150,255,80); border: 1px solid rgba(0,150,255,150); color: #fff; border-radius: 7px;')
         nav_row.addWidget(self.date_next_btn)
 
         pie_layout.addLayout(nav_row)
 
         self.daily_pie_chart = DailyPieChart()
+        self.daily_pie_chart.setMinimumHeight(820)
         pie_layout.addWidget(self.daily_pie_chart, 1)
 
         layout.addWidget(self.pie_container, 2)
