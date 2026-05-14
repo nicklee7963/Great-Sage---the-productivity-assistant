@@ -1,8 +1,35 @@
+import os
+import sys
+from pathlib import Path
+
+_venv_root = Path(sys.executable).resolve().parent.parent
+_qt_plugins_path = _venv_root / 'Lib' / 'site-packages' / 'PyQt5' / 'Qt5' / 'plugins'
+_qt_platforms_path = _qt_plugins_path / 'platforms'
+if _qt_platforms_path.exists():
+    os.environ.setdefault('QT_QPA_PLATFORM_PLUGIN_PATH', str(_qt_platforms_path))
+    os.environ.setdefault('QT_PLUGIN_PATH', str(_qt_plugins_path))
+
 from PyQt5 import QtWidgets, QtCore, QtGui, QtMultimedia
 import random
-import os
 import math
 import json
+from datetime import datetime
+
+
+# 活動霓虹色定義（大賢者主題 - 霓虹青藍色系）
+ACTIVITY_NEON_COLORS = {
+    '讀書中': QtGui.QColor(0, 255, 200),        # 亮青綠
+    '修習中': QtGui.QColor(0, 255, 200),        # 亮青綠
+    '健身中': QtGui.QColor(0, 200, 255),        # 霓虹藍
+    '休息中': QtGui.QColor(100, 200, 255),      # 淡霓虹藍
+    '工作中': QtGui.QColor(0, 230, 200),        # 亮青
+    '冥想中': QtGui.QColor(0, 180, 255),        # 深藍
+}
+
+# 預設活動顏色
+def get_neon_color(activity_text):
+    """獲取活動對應的霓虹色（大賢者主題）"""
+    return ACTIVITY_NEON_COLORS.get(activity_text, QtGui.QColor(0, 255, 150))
 
 
 SAGE_STYLE = """
@@ -55,6 +82,100 @@ QComboBox QAbstractItemView {
     selection-background-color: rgba(0, 242, 255, 80);
 }
 """
+
+
+class DailyPieChart(QtWidgets.QWidget):
+    """顯示當日活動時間分配的圓餅圖（左邊圓餅圖，右邊圖例）"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.data = {}  # {活動名稱: 分鐘數}
+        self.setMinimumHeight(100)  # 最小高度
+        self.current_date = datetime.now().date()
+        self.view_mode = 'day'
+
+    def set_data(self, activities_data, date=None, view_mode='day'):
+        """設置圓餅圖數據 {活動: 分鐘數}"""
+        self.data = activities_data
+        self.view_mode = view_mode
+        if date:
+            self.current_date = date
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        
+        # 沒有數據時顯示無資料訊息
+        if not self.data or sum(self.data.values()) == 0:
+            painter.setPen(QtGui.QColor(100, 200, 255))
+            painter.setFont(QtGui.QFont('Microsoft JhengHei', 18, QtGui.QFont.Bold))
+            
+            view_text = {'day': '今日', 'week': '本週', 'month': '本月', 'year': '本年'}.get(self.view_mode, '本期')
+            painter.drawText(self.rect(), QtCore.Qt.AlignCenter, f'{view_text}\n暫無統計數據')
+            return
+
+        # 繪製日期標題（西元年月日）
+        painter.setFont(QtGui.QFont('Microsoft JhengHei', 14, QtGui.QFont.Bold))
+        painter.setPen(QtGui.QColor(255, 255, 255))  # 白色
+        date_str = self.current_date.strftime('%Y年%m月%d日')
+        painter.drawText(0, 5, self.width(), 25, QtCore.Qt.AlignCenter, date_str)
+
+        # 計算佈局：左邊圓餅圖，右邊圖例
+        title_height = 30
+        available_height = self.height() - title_height
+        
+        # 右邊圖例預留寬度
+        legend_width = 150
+        pie_area_width = self.width() - legend_width
+        
+        # 圓餅圖直徑 = pie_area_width * 3/4，並限制不超過高度
+        pie_size = min(pie_area_width * 0.75, available_height)
+        pie_x = (pie_area_width - pie_size) / 2
+        pie_y = title_height + (available_height - pie_size) / 2
+        rect = QtCore.QRectF(pie_x, pie_y, pie_size, pie_size)
+
+        # 繪製圓餅圖
+        total = sum(self.data.values())
+        start_angle = 0
+
+        for activity, minutes in self.data.items():
+            if minutes <= 0:
+                continue
+            angle = (minutes / total) * 360 * 16  # Qt 使用 1/16 度為單位
+            color = get_neon_color(activity)
+
+            painter.setBrush(color)
+            painter.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 120), 2))
+            painter.drawPie(rect, int(start_angle), int(angle))
+
+            start_angle += angle
+
+        # 繪製圖例（右邊，小字體）
+        legend_x = pie_area_width + 10
+        legend_start_y = title_height + 15
+        painter.setFont(QtGui.QFont('Microsoft JhengHei', 9, QtGui.QFont.Bold))
+
+        sorted_items = sorted(self.data.items(), key=lambda x: x[1], reverse=True)
+        for idx, (activity, minutes) in enumerate(sorted_items):
+            if minutes <= 0:
+                continue
+            color = get_neon_color(activity)
+
+            legend_y = int(legend_start_y + idx * 24)
+
+            # 顏色方塊（較小）
+            painter.setBrush(color)
+            painter.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 200), 1))
+            painter.drawRect(QtCore.QRectF(legend_x, legend_y, 12, 12))
+
+            # 標籤文字（小字體）
+            painter.setPen(QtGui.QColor(255, 255, 255))
+            percentage = (minutes / total) * 100
+            label_text = f'{activity} {minutes}m'
+            painter.drawText(int(legend_x + 16), legend_y, 120, 14,
+                            QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, label_text)
+
+
 
 
 class SageBackground(QtWidgets.QWidget):
@@ -291,6 +412,7 @@ class PomodoroController(QtCore.QObject):
     alarmStarted = QtCore.pyqtSignal()
     alarmStopped = QtCore.pyqtSignal()
     sessionRecorded = QtCore.pyqtSignal(str, int, str)
+    pieChartUpdateRequested = QtCore.pyqtSignal()  # 圓餅圖更新信號
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -348,6 +470,8 @@ class PomodoroController(QtCore.QObject):
             except Exception:
                 pass
             self.alarmStarted.emit()
+            # 計時完成時更新圓餅圖
+            self.pieChartUpdateRequested.emit()
         except Exception:
             pass
 
@@ -477,8 +601,14 @@ class PomodoroController(QtCore.QObject):
                 pass
 
     def stop(self, record_session=False):
-        if record_session and self.stopwatch_mode and self.remaining_seconds > 0:
-            self._record_session(self.remaining_seconds, '碼錶')
+        # 自動記錄秒錶暫停或計時完成的時間
+        if self.running:
+            if self.stopwatch_mode and self.remaining_seconds > 0:
+                # 秒錶暫停時記錄
+                self._record_session(self.remaining_seconds, '秒錶')
+                # 暫停時更新圓餅圖
+                self.pieChartUpdateRequested.emit()
+            # 倒計時已在 _on_finish 中記錄
         self.running = False
         self.timer.stop()
         self._emit()
@@ -489,7 +619,7 @@ class PomodoroController(QtCore.QObject):
 
     def toggle(self):
         if self.running:
-            self.stop(record_session=self.stopwatch_mode)
+            self.stop(record_session=True)
         else:
             self.start()
 
@@ -634,7 +764,7 @@ class MenuSageWindow(QtWidgets.QMainWindow):
     def __init__(self, controller=None):
         super().__init__()
         self.setWindowTitle('個體名：大賢者 - 功能選單')
-        self.setMinimumSize(520, 900)
+        self.setMinimumSize(520, 520)  # 正方形視窗
         self.setStyleSheet(SAGE_STYLE)
         self.controller = controller or PomodoroController(self)
         self._add_status_label = '新增...'
@@ -710,6 +840,7 @@ class MenuSageWindow(QtWidgets.QMainWindow):
         self.set_active(0)
         self.controller.updated.connect(self._sync_controls)
         self.controller.sessionRecorded.connect(self._on_session_recorded)
+        self.controller.pieChartUpdateRequested.connect(self._refresh_pie_chart)
         self.controller.reset()
 
         # alarm mode controls
@@ -880,9 +1011,21 @@ class MenuSageWindow(QtWidgets.QMainWindow):
         btn_row.setSpacing(10)
         self.toggle_btn = QtWidgets.QPushButton('開始')
         self.reset_btn = QtWidgets.QPushButton('重開')
+        
+        # 按鈕樣式：有 hover 和 pressed 效果
+        btn_style = (
+            "font-size: 24px; font-weight: 800; background: rgba(7,16,29,205); "
+            "border:1px solid rgba(117,220,255,80); color: #e6fbff; border-radius:12px; "
+            "padding: 10px;"
+        )
+        btn_hover_pressed = (
+            "QPushButton:hover { background: rgba(33, 62, 95, 235); border: 1px solid rgba(168, 241, 255, 160); }"
+            "QPushButton:pressed { background: rgba(0, 200, 255, 150); border: 2px solid rgba(0, 255, 200, 255); }"
+        )
+        
         for button in (self.toggle_btn, self.reset_btn):
             button.setMinimumHeight(112)
-            button.setStyleSheet("font-size: 24px; font-weight: 800; background: rgba(7,16,29,205); border:1px solid rgba(117,220,255,80); color: #e6fbff; border-radius:12px;")
+            button.setStyleSheet(btn_style + btn_hover_pressed)
         btn_row.addWidget(self.toggle_btn)
         btn_row.addWidget(self.reset_btn)
         layout.addLayout(btn_row)
@@ -904,17 +1047,63 @@ class MenuSageWindow(QtWidgets.QMainWindow):
         stats_row = QtWidgets.QHBoxLayout()
         stats_row.setSpacing(8)
         self.stats_buttons = []
-        for label_text in ['當天', '當周', '當月', '當年']:
-            button = QtWidgets.QPushButton(label_text)
-            button.setMinimumHeight(54)
-            button.setStyleSheet(
-                'font-size: 18px; font-weight: 800; background: rgba(7,16,29,205); '
-                'border:1px solid rgba(117,220,255,80); color: #e6fbff; border-radius:12px;'
-            )
-            button.setCheckable(True)
-            stats_row.addWidget(button)
-            self.stats_buttons.append(button)
+        button_styles_unchecked = (
+            'font-size: 18px; font-weight: 800; background: rgba(7,16,29,205); '
+            'border:1px solid rgba(117,220,255,80); color: #e6fbff; border-radius:12px;'
+        )
+        button_styles_checked = (
+            'font-size: 18px; font-weight: 800; background: rgba(0,255,150,100); '
+            'border:2px solid rgba(0,255,150,255); color: #000000; border-radius:12px;'
+        )
+        # 只保留「當天」按鈕
+        button = QtWidgets.QPushButton('當天')
+        button.setMinimumHeight(54)
+        button.setStyleSheet(
+            button_styles_unchecked + 
+            f'\nQPushButton:checked {{ {button_styles_checked} }}'
+        )
+        button.setCheckable(True)
+        button.setChecked(True)
+        stats_row.addWidget(button)
+        self.stats_buttons.append(button)
+        stats_row.addStretch(1)
         layout.addLayout(stats_row)
+
+        # === 圓餅圖面板（含日期導航） - 初始隱藏 ===
+        self.pie_container = QtWidgets.QFrame()
+        self.pie_container.setStyleSheet('background: rgba(7,16,29,180); border: 1px solid rgba(0,255,200,60); border-radius: 12px;')
+        self.pie_container.hide()  # 初始隱藏
+        pie_layout = QtWidgets.QVBoxLayout(self.pie_container)
+        pie_layout.setContentsMargins(8, 8, 8, 8)  # 減少邊距
+        pie_layout.setSpacing(8)  # 減少間距
+
+        # 日期導航行
+        nav_row = QtWidgets.QHBoxLayout()
+        nav_row.setSpacing(6)
+
+        self.date_prev_btn = QtWidgets.QPushButton('◀ 前一天')
+        self.date_prev_btn.setMaximumWidth(100)
+        self.date_prev_btn.setMinimumHeight(28)
+        self.date_prev_btn.setStyleSheet('font-size: 10px; font-weight: 700; background: rgba(0,150,255,80); border: 1px solid rgba(0,150,255,150); color: #fff; border-radius: 6px;')
+        nav_row.addWidget(self.date_prev_btn)
+
+        self.date_display = QtWidgets.QLabel('今日')
+        self.date_display.setAlignment(QtCore.Qt.AlignCenter)
+        self.date_display.setStyleSheet('font-size: 12px; font-weight: 700; color: #ffffff;')
+        nav_row.addWidget(self.date_display, 1)
+
+        self.date_next_btn = QtWidgets.QPushButton('後一天 ▶')
+        self.date_next_btn.setMaximumWidth(100)
+        self.date_next_btn.setMinimumHeight(28)
+        self.date_next_btn.setStyleSheet('font-size: 10px; font-weight: 700; background: rgba(0,150,255,80); border: 1px solid rgba(0,150,255,150); color: #fff; border-radius: 6px;')
+        nav_row.addWidget(self.date_next_btn)
+
+        pie_layout.addLayout(nav_row)
+
+        self.daily_pie_chart = DailyPieChart()
+        pie_layout.addWidget(self.daily_pie_chart, 1)
+
+        layout.addWidget(self.pie_container, 2)
 
         self.record_panel = QtWidgets.QFrame()
         self.record_panel.setStyleSheet('background: rgba(7,16,29,180); border: 1px solid rgba(117,220,255,80); border-radius: 16px;')
@@ -923,20 +1112,132 @@ class MenuSageWindow(QtWidgets.QMainWindow):
         record_layout.setSpacing(6)
         self.record_title = QtWidgets.QLabel('本次紀錄')
         self.record_title.setAlignment(QtCore.Qt.AlignCenter)
-        self.record_title.setStyleSheet('font-size: 16px; color: #bdefff; font-weight: 700;')
+        self.record_title.setStyleSheet('font-size: 16px; color: #ffffff; font-weight: 700;')
         self.record_text = QtWidgets.QLabel('尚未產生紀錄')
         self.record_text.setAlignment(QtCore.Qt.AlignCenter)
         self.record_text.setWordWrap(True)
-        self.record_text.setStyleSheet('font-size: 36px; font-weight: 900; color: #f1ffff;')
+        self.record_text.setStyleSheet('font-size: 36px; font-weight: 900; color: #ffffff;')
         record_layout.addWidget(self.record_title)
         record_layout.addWidget(self.record_text)
-        layout.addWidget(self.record_panel)
+        layout.addWidget(self.record_panel, 1)
 
+        # 初始化活動分配字典、查看日期和視圖模式
+        self.daily_allocations = {}  # {活動: 分鐘數}
+        self.viewing_date = datetime.now().date()  # 當前查看的日期
+        self._view_mode = 'day'  # 'day', 'week', 'month', 'year' - 必須先初始化
+        self._session_records_file = os.path.join(os.path.dirname(__file__), 'session_records.json')
+        # 追蹤上一次設置的分鐘數，只有改變時才重新設置
+        self._last_work_minutes = self.work_input.value()
+
+        # 連接信號槽
         self.toggle_btn.clicked.connect(self._toggle_pomodoro)
         self.reset_btn.clicked.connect(self._reset_pomodoro)
         self.mode_combo.currentTextChanged.connect(self._on_mode_combo_changed)
         self.mode_delete_btn.clicked.connect(self._delete_current_status)
+        self.date_prev_btn.clicked.connect(self._on_date_prev)
+        self.date_next_btn.clicked.connect(self._on_date_next)
+        self.stats_buttons[0].clicked.connect(self._on_show_today)      # 當天
+
+        # 初始化加載當日統計（但不顯示圓餅圖，除非點「當天」）
+        self._view_mode = 'day'
+
         return panel
+
+    def _on_show_today(self):
+        """點擊當天按鈕 - 顯示圓餅圖並刷新"""
+        self._view_mode = 'day'
+        self.viewing_date = datetime.now().date()
+        self.date_prev_btn.show()
+        self.date_next_btn.show()
+        self.pie_container.show()  # 顯示圓餅圖容器
+        self._refresh_pie_chart()
+
+    def _on_date_prev(self):
+        """前一天"""
+        from datetime import timedelta
+        self.viewing_date -= timedelta(days=1)
+        self.pie_container.show()  # 確保容器顯示
+        self._refresh_pie_chart()
+
+    def _on_date_next(self):
+        """後一天"""
+        from datetime import timedelta
+        self.viewing_date += timedelta(days=1)
+        self.pie_container.show()  # 確保容器顯示
+        self._refresh_pie_chart()
+
+    def _refresh_pie_chart(self):
+        """刷新圓餅圖顯示"""
+        self._load_daily_statistics()
+        self._update_date_display()
+        self.daily_pie_chart.set_data(self.daily_allocations, self.viewing_date, self._view_mode)
+
+    def _update_date_display(self):
+        """更新日期顯示"""
+        today = datetime.now().date()
+        if self._view_mode == 'day':
+            if self.viewing_date == today:
+                date_text = '今日 ' + self.viewing_date.strftime('%Y年%m月%d日')
+            elif self.viewing_date == today - __import__('datetime').timedelta(days=1):
+                date_text = '昨日 ' + self.viewing_date.strftime('%Y年%m月%d日')
+            elif self.viewing_date == today + __import__('datetime').timedelta(days=1):
+                date_text = '明日 ' + self.viewing_date.strftime('%Y年%m月%d日')
+            else:
+                date_text = self.viewing_date.strftime('%Y年%m月%d日')
+        elif self._view_mode == 'week':
+            date_text = f'{today.strftime("%Y")} 年 第 {today.isocalendar()[1]} 週'
+        elif self._view_mode == 'month':
+            date_text = f'{today.strftime("%Y-%m")} 月'
+        elif self._view_mode == 'year':
+            date_text = f'{today.strftime("%Y")} 年'
+        else:
+            date_text = '統計'
+        self.date_display.setText(date_text)
+
+    def _load_daily_statistics(self):
+        """根據 view_mode 從 session_records.json 讀取統計"""
+        self.daily_allocations.clear()
+        try:
+            if os.path.isfile(self._session_records_file):
+                with open(self._session_records_file, 'r', encoding='utf-8') as f:
+                    records = json.load(f)
+                    if isinstance(records, list):
+                        for record in records:
+                            if isinstance(record, dict):
+                                timestamp_str = record.get('timestamp', '')
+                                if not timestamp_str:
+                                    continue
+                                try:
+                                    record_date = datetime.fromisoformat(timestamp_str.split('T')[0]).date()
+                                except Exception:
+                                    continue
+
+                                # 根據 view_mode 判斷是否包含此記錄
+                                should_include = False
+                                if self._view_mode == 'day':
+                                    should_include = record_date == self.viewing_date
+                                elif self._view_mode == 'week':
+                                    today = datetime.now().date()
+                                    target_week = today.isocalendar()[1]
+                                    target_year = today.isocalendar()[0]
+                                    record_week = record_date.isocalendar()[1]
+                                    record_year = record_date.isocalendar()[0]
+                                    should_include = (record_week == target_week and record_year == target_year)
+                                elif self._view_mode == 'month':
+                                    today = datetime.now().date()
+                                    should_include = (record_date.year == today.year and record_date.month == today.month)
+                                elif self._view_mode == 'year':
+                                    today = datetime.now().date()
+                                    should_include = record_date.year == today.year
+
+                                if should_include:
+                                    status = record.get('status', '')
+                                    seconds = record.get('seconds', 0)
+                                    if status and seconds > 0:
+                                        minutes = int(round(seconds / 60.0))
+                                        self.daily_allocations[status] = self.daily_allocations.get(status, 0) + minutes
+        except Exception:
+            pass
 
     def _on_session_recorded(self, status_text, seconds, mode_name):
         status_text = self._normalize_status_text(status_text)
@@ -947,15 +1248,26 @@ class MenuSageWindow(QtWidgets.QMainWindow):
         minutes = max(1, int(round(float(seconds) / 60.0))) if seconds > 0 else 0
         self.record_text.setText(f'{status_text}\n{minutes} 分鐘')
 
+        # 無論什麼視圖模式都自動刷新圓餅圖
+        self._refresh_pie_chart()
+
     def _toggle_pomodoro(self):
-        self.controller.set_work_minutes(self.work_input.value())
-        # clear record area when starting a new run
-        if not self.controller.running:
+        # 只有當用戶改變時間值時才重新設置
+        # 暫停後按開始會直接繼續，不重新設定
+        current_value = self.work_input.value()
+        if current_value != self._last_work_minutes:
+            # 時間值改變，重新設置
+            self.controller.set_work_minutes(current_value)
+            self._last_work_minutes = current_value
             self.record_text.setText('尚未產生紀錄')
+        # 無論時間是否改變，都直接切換開始/暫停（繼續從暫停時間開始）
         self.controller.toggle()
 
     def _reset_pomodoro(self):
-        self.controller.set_work_minutes(self.work_input.value())
+        # 重開會重新設置時間
+        current_value = self.work_input.value()
+        self.controller.set_work_minutes(current_value)
+        self._last_work_minutes = current_value
         self.controller.reset()
 
     def _sync_controls(self, remaining_seconds, progress, running, activity_text):
