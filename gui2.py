@@ -692,40 +692,38 @@ class FinalSageWindow(QtWidgets.QMainWindow):
 
         self.calendar_summary_widget = QtWidgets.QFrame(root)
         self.calendar_summary_widget.setStyleSheet(
-            "background: rgba(7,16,29,220);"
-            " border: 1px solid rgba(117,220,255,80);"
-            " border-radius: 24px;"
+            "background: transparent;"
+            " border: none;"
         )
-        self.calendar_summary_widget.setMinimumSize(640 if compact_mode else 720, 640 if compact_mode else 720)
         self.calendar_summary_widget.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         summary_layout = QtWidgets.QVBoxLayout(self.calendar_summary_widget)
-        summary_layout.setContentsMargins(24, 24, 24, 24)
-        summary_layout.setSpacing(12)
+        summary_layout.setContentsMargins(0, 0, 0, 0)
+        summary_layout.setSpacing(0)
+        summary_layout.addStretch(1)
 
-        self.calendar_summary_title = QtWidgets.QLabel('日期作息')
+        self.calendar_summary_title = QtWidgets.QLabel('')
         self.calendar_summary_title.setAlignment(QtCore.Qt.AlignCenter)
         self.calendar_summary_title.setStyleSheet(f'color: #dffcff; font-size: {_ui_size(24, 18, compact_mode)}pt; font-weight: 800; letter-spacing: 4px;')
-        summary_layout.addWidget(self.calendar_summary_title)
+        self.calendar_summary_title.hide()
 
         self.calendar_summary_date = QtWidgets.QLabel('')
         self.calendar_summary_date.setAlignment(QtCore.Qt.AlignCenter)
         self.calendar_summary_date.setStyleSheet(f'color: #7fdcff; font-size: {_ui_size(14, 11, compact_mode)}pt; font-weight: 700;')
-        summary_layout.addWidget(self.calendar_summary_date)
+        self.calendar_summary_date.hide()
 
-        self.calendar_summary_list = QtWidgets.QListWidget()
-        self.calendar_summary_list.setStyleSheet(
-            "QListWidget {"
-            " background: rgba(9,18,31,235);"
-            " color: #effcff;"
-            " border: 1px solid rgba(117,220,255,60);"
-            " border-radius: 14px;"
-            " padding: 8px;"
-            "}"
-        )
-        self.calendar_summary_list.setSpacing(6)
-        summary_layout.addWidget(self.calendar_summary_list, 1)
+        # Create custom container for calendar items
+        self.calendar_items_container = QtWidgets.QWidget()
+        self.calendar_items_container.setStyleSheet('background: transparent;')
+        self.calendar_items_layout = QtWidgets.QVBoxLayout(self.calendar_items_container)
+        self.calendar_items_layout.setContentsMargins(0, 0, 0, 0)
+        self.calendar_items_layout.setSpacing(12)
+        self.calendar_items_layout.addStretch(1)
+        
+        summary_layout.addWidget(self.calendar_items_container, 0, QtCore.Qt.AlignCenter)
+        summary_layout.addStretch(1)
+
         self.calendar_summary_widget.hide()
-        overlay_layout.addWidget(self.calendar_summary_widget, alignment=QtCore.Qt.AlignCenter)
+        self.main_layout.addWidget(self.calendar_summary_widget, 0, 0)
 
         self.main_layout.addWidget(self.bg, 0, 0)
         self.main_layout.addWidget(self.overlay, 0, 0)
@@ -779,7 +777,16 @@ class FinalSageWindow(QtWidgets.QMainWindow):
                 self.calendar_summary_date.setText(selected_date.strftime('%Y年%m月%d日'))
             else:
                 self.calendar_summary_date.setText('')
-            self.calendar_summary_list.clear()
+            
+            # Clear previous items
+            while self.calendar_items_layout.count() > 0:
+                item = self.calendar_items_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+            
+            # Add top stretch
+            self.calendar_items_layout.addStretch(1)
+            
             if events:
                 for event in events:
                     if isinstance(event, dict):
@@ -788,12 +795,24 @@ class FinalSageWindow(QtWidgets.QMainWindow):
                     else:
                         time_text = ''
                         task_text = str(event)
-                    item_text = f'{time_text} {task_text}'.strip()
-                    self.calendar_summary_list.addItem(item_text)
+                    # Add large spacing between time and task
+                    item_text = f'{time_text}          {task_text}'.strip()
+                    
+                    # Create label for each event
+                    event_label = QtWidgets.QLabel(item_text)
+                    event_label.setAlignment(QtCore.Qt.AlignCenter)
+                    event_label.setFont(QtGui.QFont('SimSun-ExtB', 20, QtGui.QFont.Bold))
+                    event_label.setStyleSheet('color: #ffffff; letter-spacing: 2px;')
+                    self.calendar_items_layout.addWidget(event_label)
             else:
-                empty_item = QtWidgets.QListWidgetItem('這一天還沒有安排')
-                empty_item.setFlags(QtCore.Qt.NoItemFlags)
-                self.calendar_summary_list.addItem(empty_item)
+                empty_label = QtWidgets.QLabel('這一天還沒有安排')
+                empty_label.setAlignment(QtCore.Qt.AlignCenter)
+                empty_label.setFont(QtGui.QFont('SimSun-ExtB', 20, QtGui.QFont.Bold))
+                empty_label.setStyleSheet('color: #ffffff; letter-spacing: 2px;')
+                self.calendar_items_layout.addWidget(empty_label)
+            
+            # Add bottom stretch
+            self.calendar_items_layout.addStretch(1)
         except Exception:
             pass
 
