@@ -204,37 +204,14 @@ class PetWindow(QtWidgets.QLabel):
 if __name__ == '__main__':
     import gui2
     app = QtWidgets.QApplication(sys.argv)
+    compact_mode = len(app.screens()) < 2
     # use assets/walk for walking animation
     assets_dir = os.path.join(os.path.dirname(__file__), 'assets', 'walk')
-    # create main GUI window but keep hidden until pet clicked
-    controller = gui2.PomodoroController()
-    main_win = gui2.FinalSageWindow(controller=controller)
-    menu_win = gui2.MenuSageWindow(controller=controller)
-
-    def show_on_screen(window, screen, fullscreen=True):
-        geometry = screen.geometry()
-        window.move(geometry.topLeft())
-        window.resize(geometry.size())
-        window.show()
-        if window.windowHandle():
-            window.windowHandle().setScreen(screen)
-        if fullscreen:
-            window.showFullScreen()
+    # create the shared GUI windows but keep them hidden until the pet is clicked
+    controller, main_win, menu_win = gui2.create_sage_windows(compact_mode=compact_mode)
 
     def _do_open_gui():
-        screens = QtWidgets.QApplication.screens()
-        if screens:
-            show_on_screen(main_win, screens[0])
-        else:
-            main_win.showFullScreen()
-
-        if len(screens) > 1:
-            show_on_screen(menu_win, screens[1])
-        else:
-            menu_win.showFullScreen()
-
-        main_win.raise_()
-        main_win.activateWindow()
+        gui2.arrange_sage_windows(app, main_win, menu_win, compact_mode=compact_mode)
 
     # simple shared state for toggle/Q handling
     state = {'gui_visible': False, 'alarm_active': False}

@@ -7,6 +7,9 @@ from datetime import datetime
 
 from PyQt5 import QtWidgets, QtCore, QtGui, QtMultimedia
 
+from pomodoro_feature import PomodoroController, PomodoroPanel
+from calendar_feature import CalendarPanel
+
 
 def _configure_qt_plugin_paths():
     venv_root = Path(sys.executable).resolve().parent.parent
@@ -34,6 +37,10 @@ ACTIVITY_NEON_COLORS = {
 def get_neon_color(activity_text):
     """獲取活動對應的霓虹色（大賢者主題）"""
     return ACTIVITY_NEON_COLORS.get(activity_text, QtGui.QColor(0, 255, 150))
+
+
+def _ui_size(normal_size, compact_size, compact_mode):
+    return compact_size if compact_mode else normal_size
 
 
 SAGE_STYLE = """
@@ -90,11 +97,12 @@ QComboBox QAbstractItemView {
 
 class DailyPieChart(QtWidgets.QWidget):
     """顯示當日活動時間分配的圓餅圖（左邊圓餅圖，右邊圖例）"""
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, compact_mode=False):
         super().__init__(parent)
+        self.compact_mode = compact_mode
         self.data = {}  # {活動名稱: 分鐘數}
         self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
-        self.setMinimumSize(720, 760)
+        self.setMinimumSize(540 if compact_mode else 720, 580 if compact_mode else 760)
         self.setMinimumHeight(100)  # 最小高度
         self.current_date = datetime.now().date()
         self.view_mode = 'day'
@@ -111,21 +119,22 @@ class DailyPieChart(QtWidgets.QWidget):
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
 
-        margin_x = 24
-        margin_y = 18
+        margin_x = 14 if self.compact_mode else 24
+        margin_y = 12 if self.compact_mode else 18
         inner_rect = self.rect().adjusted(margin_x, margin_y, -margin_x, -margin_y)
 
-        title_height = 34
-        legend_top_gap = 18
-        legend_item_height = 26
-        legend_swatch = 16
+        title_height = 26 if self.compact_mode else 34
+        legend_top_gap = 12 if self.compact_mode else 18
+        legend_item_height = 20 if self.compact_mode else 26
+        legend_swatch = 12 if self.compact_mode else 16
         legend_rows = max(1, sum(1 for value in self.data.values() if value > 0))
         legend_height = legend_rows * legend_item_height + 10
 
         available_width = max(1, inner_rect.width())
         available_height = max(1, inner_rect.height() - title_height - legend_height - legend_top_gap)
         chart_side = min(available_width, available_height)
-        pie_size = max(180, int(chart_side * 0.75))
+        pie_scale = 0.60 if self.compact_mode else 0.75
+        pie_size = max(140 if self.compact_mode else 180, int(chart_side * pie_scale))
         pie_x = inner_rect.center().x() - pie_size / 2
         pie_y = inner_rect.top() + title_height + max(0, (available_height - pie_size) / 2)
         pie_rect = QtCore.QRectF(pie_x, pie_y, pie_size, pie_size)
@@ -138,14 +147,14 @@ class DailyPieChart(QtWidgets.QWidget):
         # 沒有數據時顯示無資料訊息
         if not self.data or sum(self.data.values()) == 0:
             painter.setPen(QtGui.QColor(255, 255, 255))
-            painter.setFont(QtGui.QFont('Microsoft JhengHei', 18, QtGui.QFont.Bold))
+            painter.setFont(QtGui.QFont('Microsoft JhengHei', _ui_size(18, 12, self.compact_mode), QtGui.QFont.Bold))
             
             view_text = {'day': '今日', 'week': '本週', 'month': '本月', 'year': '本年'}.get(self.view_mode, '本期')
             painter.drawText(self.rect(), QtCore.Qt.AlignCenter, f'{view_text}\n暫無統計數據')
             return
 
         # 繪製日期標題（西元年月日）
-        painter.setFont(QtGui.QFont('Microsoft JhengHei', 14, QtGui.QFont.Bold))
+        painter.setFont(QtGui.QFont('Microsoft JhengHei', _ui_size(14, 11, self.compact_mode), QtGui.QFont.Bold))
         painter.setPen(QtGui.QColor(255, 255, 255))
         date_str = self.current_date.strftime('%Y年%m月%d日')
         painter.drawText(inner_rect.left(), inner_rect.top(), inner_rect.width(), title_height, QtCore.Qt.AlignCenter, date_str)
@@ -167,7 +176,7 @@ class DailyPieChart(QtWidgets.QWidget):
             start_angle += angle
 
         # 繪製圖例（下方集中排列）
-        painter.setFont(QtGui.QFont('Microsoft JhengHei', 10, QtGui.QFont.Bold))
+        painter.setFont(QtGui.QFont('Microsoft JhengHei', _ui_size(10, 8, self.compact_mode), QtGui.QFont.Bold))
 
         sorted_items = sorted(self.data.items(), key=lambda x: x[1], reverse=True)
         legend_y = legend_start_y
@@ -184,7 +193,7 @@ class DailyPieChart(QtWidgets.QWidget):
             # 標籤文字
             painter.setPen(QtGui.QColor(255, 255, 255))
             label_text = f'{activity} {minutes}m'
-            painter.drawText(int(legend_x + legend_swatch + 10), legend_y, legend_width - legend_swatch - 10, legend_item_height,
+            painter.drawText(int(legend_x + legend_swatch + 6), legend_y, legend_width - legend_swatch - 6, legend_item_height,
                             QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, label_text)
             legend_y += legend_item_height
 
@@ -291,9 +300,10 @@ class MagicBackgroundNotice(QtWidgets.QWidget):
 
 
 class SageSpeakingDiamond(QtWidgets.QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, compact_mode=False):
         super().__init__(parent)
-        self.setFixedSize(400, 400)
+        self.compact_mode = compact_mode
+        self.setFixedSize(340 if compact_mode else 360, 340 if compact_mode else 400)
         # no subtitle / typing text per user request
         self.display_text = ""
         self.full_text = ""
@@ -318,12 +328,12 @@ class SageSpeakingDiamond(QtWidgets.QWidget):
         painter.setBrush(QtGui.QColor(0, 0, 0, 220))
         painter.drawPath(path)
         painter.setPen(QtGui.QColor(255, 255, 255))
-        painter.setFont(QtGui.QFont('Microsoft JhengHei', 22, QtGui.QFont.Bold))
+        painter.setFont(QtGui.QFont('Microsoft JhengHei', _ui_size(22, 16, self.compact_mode), QtGui.QFont.Bold))
         painter.drawText(QtCore.QRect(w//2 + 35, h//2 - 110, 60, 120), QtCore.Qt.AlignCenter, "專\n注\n模\n式")
-        font_main = QtGui.QFont('SimSun-ExtB', 68, QtGui.QFont.Bold)
+        font_main = QtGui.QFont('SimSun-ExtB', _ui_size(68, 48, self.compact_mode), QtGui.QFont.Bold)
         painter.setFont(font_main)
         painter.drawText(QtCore.QRect(0, 0, w, h), QtCore.Qt.AlignCenter, "專\n注\n者")
-        font_side = QtGui.QFont('SimSun-ExtB', 30, QtGui.QFont.Bold)
+        font_side = QtGui.QFont('SimSun-ExtB', _ui_size(30, 20, self.compact_mode), QtGui.QFont.Bold)
         painter.setFont(font_side)
         painter.drawText(w // 2 - 120, h // 2 + 10, "成")
         painter.drawText(w // 2 + 80, h // 2 + 10, "功")
@@ -348,20 +358,26 @@ class SageNoticeWindow(QtWidgets.QMainWindow):
 
 
 class GreatSageDisc(QtWidgets.QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, compact_mode=False):
         super().__init__(parent)
-        self.setMinimumSize(700, 700)
+        self.compact_mode = compact_mode
+        self.setMinimumSize(640 if compact_mode else 700, 640 if compact_mode else 700)
         self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         self.remaining_text = '25:00'
         self.progress = 0.0
         self.running = False
         self.activity_text = '讀書中'
+        self.status_override_text = ''
+
+    def set_status_override(self, text=''):
+        self.status_override_text = text or ''
+        self.update()
 
     def set_timer_state(self, remaining_seconds, progress, running, activity_text):
         self.remaining_text = f'{remaining_seconds // 60:02d}:{remaining_seconds % 60:02d}'
         self.progress = max(0.0, min(1.0, progress))
         self.running = running
-        self.activity_text = activity_text
+        self.activity_text = self.status_override_text or activity_text
         self.update()
 
     def paintEvent(self, event):
@@ -394,10 +410,10 @@ class GreatSageDisc(QtWidgets.QWidget):
         painter.drawArc(ring_rect, 90 * 16, int(-360 * 16 * self.progress))
 
         painter.setPen(QtGui.QColor(40, 40, 40))
-        painter.setFont(QtGui.QFont('Microsoft JhengHei', max(10, int(self.height() * 0.03))))
+        painter.setFont(QtGui.QFont('Microsoft JhengHei', max(7 if self.compact_mode else 10, int(self.height() * (0.018 if self.compact_mode else 0.03)))))
         painter.drawText(QtCore.QRect(0, int(self.height() * 0.22), self.width(), 40), QtCore.Qt.AlignCenter, 'ユニークスキル')
 
-        main_font = QtGui.QFont('SimSun-ExtB', max(48, int(self.height() * 0.16)), QtGui.QFont.Bold)
+        main_font = QtGui.QFont('SimSun-ExtB', max(24 if self.compact_mode else 48, int(self.height() * (0.08 if self.compact_mode else 0.16))), QtGui.QFont.Bold)
         painter.setFont(main_font)
         painter.drawText(QtCore.QRect(0, int(self.height() * 0.30), self.width(), int(self.height() * 0.22)), QtCore.Qt.AlignCenter, '大賢者')
 
@@ -409,13 +425,13 @@ class GreatSageDisc(QtWidgets.QWidget):
 
         painter.setPen(QtGui.QPen(QtGui.QColor(50, 90, 80), 3))
         painter.drawRect(rect)
-        painter.setFont(QtGui.QFont('Microsoft JhengHei', max(10, int(self.height() * 0.035)), QtGui.QFont.Bold))
+        painter.setFont(QtGui.QFont('Microsoft JhengHei', max(7 if self.compact_mode else 10, int(self.height() * (0.02 if self.compact_mode else 0.035))), QtGui.QFont.Bold))
         painter.drawText(rect, QtCore.Qt.AlignCenter, self.remaining_text)
 
-        status_font = QtGui.QFont('Microsoft JhengHei', max(10, int(self.height() * 0.03)), QtGui.QFont.Bold)
+        status_font = QtGui.QFont('Microsoft JhengHei', max(7 if self.compact_mode else 10, int(self.height() * (0.018 if self.compact_mode else 0.03))), QtGui.QFont.Bold)
         painter.setFont(status_font)
         painter.setPen(QtGui.QColor(45, 85, 78))
-        status_text = self.activity_text
+        status_text = self.status_override_text or self.activity_text
         painter.drawText(QtCore.QRect(0, int(self.height() * 0.69), self.width(), 40), QtCore.Qt.AlignCenter, status_text)
 
 
@@ -643,10 +659,11 @@ class PomodoroController(QtCore.QObject):
 
 class FinalSageWindow(QtWidgets.QMainWindow):
     toggleRequested = QtCore.pyqtSignal()
-    def __init__(self, controller=None):
+    def __init__(self, controller=None, compact_mode=False):
         super().__init__()
+        self.compact_mode = compact_mode
         self.setWindowTitle('個體名：大賢者')
-        self.setMinimumSize(900, 700)
+        self.setMinimumSize(560, 560)
         self.setStyleSheet(SAGE_STYLE)
         self.controller = controller or PomodoroController(self)
 
@@ -668,10 +685,47 @@ class FinalSageWindow(QtWidgets.QMainWindow):
         overlay_layout.setContentsMargins(0, 0, 0, 0)
         overlay_layout.addStretch(1)
 
-        self.disc = GreatSageDisc()
-        self.disc.setFixedSize(760, 760)
+        self.disc = GreatSageDisc(compact_mode=compact_mode)
+        self.disc.setFixedSize(700 if compact_mode else 760, 700 if compact_mode else 760)
         overlay_layout.addWidget(self.disc, alignment=QtCore.Qt.AlignCenter)
         overlay_layout.addStretch(1)
+
+        self.calendar_summary_widget = QtWidgets.QFrame(root)
+        self.calendar_summary_widget.setStyleSheet(
+            "background: rgba(7,16,29,220);"
+            " border: 1px solid rgba(117,220,255,80);"
+            " border-radius: 24px;"
+        )
+        self.calendar_summary_widget.setMinimumSize(640 if compact_mode else 720, 640 if compact_mode else 720)
+        self.calendar_summary_widget.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+        summary_layout = QtWidgets.QVBoxLayout(self.calendar_summary_widget)
+        summary_layout.setContentsMargins(24, 24, 24, 24)
+        summary_layout.setSpacing(12)
+
+        self.calendar_summary_title = QtWidgets.QLabel('日期作息')
+        self.calendar_summary_title.setAlignment(QtCore.Qt.AlignCenter)
+        self.calendar_summary_title.setStyleSheet(f'color: #dffcff; font-size: {_ui_size(24, 18, compact_mode)}pt; font-weight: 800; letter-spacing: 4px;')
+        summary_layout.addWidget(self.calendar_summary_title)
+
+        self.calendar_summary_date = QtWidgets.QLabel('')
+        self.calendar_summary_date.setAlignment(QtCore.Qt.AlignCenter)
+        self.calendar_summary_date.setStyleSheet(f'color: #7fdcff; font-size: {_ui_size(14, 11, compact_mode)}pt; font-weight: 700;')
+        summary_layout.addWidget(self.calendar_summary_date)
+
+        self.calendar_summary_list = QtWidgets.QListWidget()
+        self.calendar_summary_list.setStyleSheet(
+            "QListWidget {"
+            " background: rgba(9,18,31,235);"
+            " color: #effcff;"
+            " border: 1px solid rgba(117,220,255,60);"
+            " border-radius: 14px;"
+            " padding: 8px;"
+            "}"
+        )
+        self.calendar_summary_list.setSpacing(6)
+        summary_layout.addWidget(self.calendar_summary_list, 1)
+        self.calendar_summary_widget.hide()
+        overlay_layout.addWidget(self.calendar_summary_widget, alignment=QtCore.Qt.AlignCenter)
 
         self.main_layout.addWidget(self.bg, 0, 0)
         self.main_layout.addWidget(self.overlay, 0, 0)
@@ -683,7 +737,7 @@ class FinalSageWindow(QtWidgets.QMainWindow):
         self.notice_widget = QtWidgets.QWidget(root)
         notice_layout = QtWidgets.QGridLayout(self.notice_widget)
         self.notice_bg = MagicBackgroundNotice(self.notice_widget)
-        self.notice_diamond = SageSpeakingDiamond(self.notice_widget)
+        self.notice_diamond = SageSpeakingDiamond(self.notice_widget, compact_mode=compact_mode)
         notice_layout.addWidget(self.notice_bg, 0, 0)
         notice_layout.addWidget(self.notice_diamond, 0, 0, QtCore.Qt.AlignCenter)
         notice_layout.setContentsMargins(0, 0, 0, 0)
@@ -694,6 +748,52 @@ class FinalSageWindow(QtWidgets.QMainWindow):
         try:
             self.controller.alarmStarted.connect(self._enter_notice_mode)
             self.controller.alarmStopped.connect(self._exit_notice_mode)
+        except Exception:
+            pass
+
+    def set_mode_status(self, text='', visible=False):
+        try:
+            self.disc.set_status_override(text if visible else '')
+        except Exception:
+            pass
+
+    def show_calendar_detail(self):
+        try:
+            self.disc.hide()
+            self.calendar_summary_widget.show()
+        except Exception:
+            pass
+
+    def show_calendar_home(self):
+        try:
+            self.calendar_summary_widget.hide()
+            self.disc.show()
+        except Exception:
+            pass
+
+    def show_calendar_summary(self, selected_date, events):
+        try:
+            self.disc.hide()
+            self.calendar_summary_widget.show()
+            if selected_date is not None:
+                self.calendar_summary_date.setText(selected_date.strftime('%Y年%m月%d日'))
+            else:
+                self.calendar_summary_date.setText('')
+            self.calendar_summary_list.clear()
+            if events:
+                for event in events:
+                    if isinstance(event, dict):
+                        time_text = event.get('time', '')
+                        task_text = event.get('task', event.get('text', ''))
+                    else:
+                        time_text = ''
+                        task_text = str(event)
+                    item_text = f'{time_text} {task_text}'.strip()
+                    self.calendar_summary_list.addItem(item_text)
+            else:
+                empty_item = QtWidgets.QListWidgetItem('這一天還沒有安排')
+                empty_item.setFlags(QtCore.Qt.NoItemFlags)
+                self.calendar_summary_list.addItem(empty_item)
         except Exception:
             pass
 
@@ -727,8 +827,10 @@ class FinalSageWindow(QtWidgets.QMainWindow):
         rect = self.centralWidget().rect()
         self.bg.setGeometry(rect)
         self.overlay.setGeometry(rect)
-        disc_size = min(max(720, int(min(rect.width(), rect.height()) * 0.82)), min(rect.width(), rect.height()) - 40)
-        disc_size = max(520, disc_size)
+        target_ratio = 0.74 if self.compact_mode else 0.82
+        disc_min = 480 if self.compact_mode else 520
+        disc_size = min(max(720, int(min(rect.width(), rect.height()) * target_ratio)), min(rect.width(), rect.height()) - 40)
+        disc_size = max(disc_min, disc_size)
         self.disc.setFixedSize(disc_size, disc_size)
 
     def keyPressEvent(self, event):
@@ -773,16 +875,14 @@ class FinalSageWindow(QtWidgets.QMainWindow):
 
 class MenuSageWindow(QtWidgets.QMainWindow):
     toggleRequested = QtCore.pyqtSignal()
-    def __init__(self, controller=None):
+    def __init__(self, controller=None, compact_mode=False, main_window=None):
         super().__init__()
+        self.compact_mode = compact_mode
+        self.main_window = main_window
         self.setWindowTitle('個體名：大賢者 - 功能選單')
-        self.setMinimumSize(520, 520)  # 正方形視窗
+        self.setMinimumSize(400, 520)  # 盡量保留左右雙窗排版的可用寬度
         self.setStyleSheet(SAGE_STYLE)
         self.controller = controller or PomodoroController(self)
-        self._add_status_label = '新增...'
-        self._status_defaults = ['讀書中', '休息中']
-        self._status_file = os.path.join(os.path.dirname(__file__), 'status_options.json')
-        self._status_options = self._load_status_options()
 
         root = QtWidgets.QWidget()
         root.setAttribute(QtCore.Qt.WA_StyledBackground, True)
@@ -799,17 +899,17 @@ class MenuSageWindow(QtWidgets.QMainWindow):
         overlay.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
         overlay.setStyleSheet('background: transparent;')
         overlay_layout = QtWidgets.QVBoxLayout(overlay)
-        overlay_layout.setContentsMargins(28, 28, 28, 28)
-        overlay_layout.setSpacing(18)
+        overlay_layout.setContentsMargins(24 if compact_mode else 28, 24 if compact_mode else 28, 24 if compact_mode else 28, 24 if compact_mode else 28)
+        overlay_layout.setSpacing(14 if compact_mode else 18)
 
         title = QtWidgets.QLabel('功能選單')
         title.setAlignment(QtCore.Qt.AlignCenter)
-        title.setStyleSheet('color: #dffcff; font-size: 22pt; font-weight: 700; letter-spacing: 4px;')
+        title.setStyleSheet(f'color: #dffcff; font-size: {_ui_size(22, 18, compact_mode)}pt; font-weight: 700; letter-spacing: 4px;')
         overlay_layout.addWidget(title)
 
         subtitle = QtWidgets.QLabel('系統存取')
         subtitle.setAlignment(QtCore.Qt.AlignCenter)
-        subtitle.setStyleSheet('color: #7fdcff; font-size: 10pt; letter-spacing: 3px;')
+        subtitle.setStyleSheet(f'color: #7fdcff; font-size: {_ui_size(10, 9, compact_mode)}pt; letter-spacing: 3px;')
         overlay_layout.addWidget(subtitle)
 
         self.menu_panel = QtWidgets.QFrame()
@@ -822,8 +922,8 @@ class MenuSageWindow(QtWidgets.QMainWindow):
         names = ['番茄鐘', '待辦清單', '進度追蹤', '行事曆']
         for index, name in enumerate(names):
             button = QtWidgets.QPushButton(name)
-            button.setMinimumHeight(100)
-            button.setStyleSheet('font-size: 22px; font-weight: 800;')
+            button.setMinimumHeight(90 if compact_mode else 100)
+            button.setStyleSheet(f'font-size: {_ui_size(22, 18, compact_mode)}px; font-weight: 800;')
             button.setCheckable(True)
             button.clicked.connect(lambda checked=False, i=index: self.set_active(i))
             menu_layout.addWidget(button)
@@ -832,17 +932,25 @@ class MenuSageWindow(QtWidgets.QMainWindow):
         self.menu_hint = QtWidgets.QLabel('')
         self.menu_hint.setWordWrap(True)
         self.menu_hint.setAlignment(QtCore.Qt.AlignCenter)
-        self.menu_hint.setStyleSheet('color: #d9f7ff; font-size: 12pt;')
+        self.menu_hint.setStyleSheet(f'color: #d9f7ff; font-size: {_ui_size(12, 10, compact_mode)}pt;')
         menu_layout.addWidget(self.menu_hint)
 
         self.editor_stack = QtWidgets.QStackedWidget()
-        self.pomodoro_editor = self._build_pomodoro_editor()
+        self.pomodoro_editor = PomodoroPanel(self.controller, compact_mode=self.compact_mode)
         self.editor_stack.addWidget(self.pomodoro_editor)
         self.editor_stack.addWidget(self._build_placeholder('待辦清單 尚未接上'))
         self.editor_stack.addWidget(self._build_placeholder('進度追蹤 尚未接上'))
-        self.editor_stack.addWidget(self._build_placeholder('行事曆 尚未接上'))
+        self.calendar_panel = CalendarPanel(compact_mode=self.compact_mode)
+        self.editor_stack.addWidget(self.calendar_panel)
         menu_layout.addWidget(self.editor_stack)
         menu_layout.addStretch(1)
+
+        try:
+            self.calendar_panel.dateOpened.connect(self._enter_calendar_detail)
+            self.calendar_panel.backRequested.connect(self._exit_calendar_detail)
+            self.calendar_panel.eventsChanged.connect(self._sync_calendar_summary)
+        except Exception:
+            pass
 
         overlay_layout.addWidget(self.menu_panel, stretch=1)
         overlay_layout.addStretch(1)
@@ -850,9 +958,6 @@ class MenuSageWindow(QtWidgets.QMainWindow):
         self.main_layout.addWidget(overlay, 0, 0)
 
         self.set_active(0)
-        self.controller.updated.connect(self._sync_controls)
-        self.controller.sessionRecorded.connect(self._on_session_recorded)
-        self.controller.pieChartUpdateRequested.connect(self._refresh_pie_chart)
         self.controller.reset()
 
         # alarm mode controls
@@ -862,8 +967,8 @@ class MenuSageWindow(QtWidgets.QMainWindow):
         alarm_layout.setContentsMargins(16, 16, 16, 16)
         alarm_layout.addStretch(1)
         self.alarm_button = QtWidgets.QPushButton('關閉鬧鐘')
-        self.alarm_button.setMinimumHeight(120)
-        self.alarm_button.setStyleSheet("font-size:28px; font-weight:800; background: rgba(7,16,29,205); color:#e6fbff; border-radius:12px;")
+        self.alarm_button.setMinimumHeight(108 if compact_mode else 120)
+        self.alarm_button.setStyleSheet(f"font-size:{_ui_size(28, 22, compact_mode)}px; font-weight:800; background: rgba(7,16,29,205); color:#e6fbff; border-radius:12px;")
         alarm_layout.addWidget(self.alarm_button, alignment=QtCore.Qt.AlignCenter)
         alarm_layout.addStretch(1)
         self.alarm_panel.hide()
@@ -880,424 +985,9 @@ class MenuSageWindow(QtWidgets.QMainWindow):
         label = QtWidgets.QLabel(text)
         label.setAlignment(QtCore.Qt.AlignCenter)
         label.setWordWrap(True)
-        label.setStyleSheet('font-size: 13pt; color: #bdefff; padding: 16px;')
+        label.setStyleSheet(f'font-size: {_ui_size(13, 11, self.compact_mode)}pt; color: #bdefff; padding: {12 if self.compact_mode else 16}px;')
         return label
 
-    def _load_status_options(self):
-        options = list(self._status_defaults)
-        try:
-            if os.path.isfile(self._status_file):
-                with open(self._status_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                loaded = data.get('statuses', []) if isinstance(data, dict) else []
-                for item in loaded:
-                    if isinstance(item, str):
-                        text = self._normalize_status_text(item)
-                        if text and text not in options:
-                            options.append(text)
-        except Exception:
-            pass
-        return options
-
-    def _normalize_status_text(self, text):
-        t = (text or '').strip()
-        if not t:
-            return ''
-        if t == self._add_status_label:
-            return t
-        if not t.endswith('中'):
-            t = f'{t}中'
-        return t
-
-    def _save_status_options(self):
-        try:
-            payload = {'statuses': self._status_options}
-            with open(self._status_file, 'w', encoding='utf-8') as f:
-                json.dump(payload, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
-
-    def _rebuild_mode_combo(self):
-        self.mode_combo.blockSignals(True)
-        current = self.mode_combo.currentText().strip() if self.mode_combo.count() else ''
-        self.mode_combo.clear()
-        self.mode_combo.addItems(self._status_options)
-        self.mode_combo.addItem(self._add_status_label)
-        if current and current in self._status_options:
-            self.mode_combo.setCurrentText(current)
-        self.mode_combo.blockSignals(False)
-
-    def _on_mode_combo_changed(self, text):
-        selected = (text or '').strip()
-        if not selected:
-            return
-        if selected == self._add_status_label:
-            value, ok = self._prompt_new_status()
-            if not ok:
-                # restore to current controller state if user canceled
-                restore = getattr(self.controller, 'activity_text', self._status_options[0])
-                self.mode_combo.blockSignals(True)
-                self.mode_combo.setCurrentText(restore if restore in self._status_options else self._status_options[0])
-                self.mode_combo.blockSignals(False)
-                return
-
-            new_text = self._normalize_status_text(value)
-            if not new_text:
-                self.mode_combo.blockSignals(True)
-                self.mode_combo.setCurrentText(getattr(self.controller, 'activity_text', self._status_options[0]))
-                self.mode_combo.blockSignals(False)
-                return
-            if new_text == self._add_status_label:
-                new_text = f'{new_text}1'
-            if new_text not in self._status_options:
-                self._status_options.append(new_text)
-                self._save_status_options()
-            self._rebuild_mode_combo()
-            self.mode_combo.blockSignals(True)
-            self.mode_combo.setCurrentText(new_text)
-            self.mode_combo.blockSignals(False)
-            self.controller.set_activity(new_text)
-            return
-
-        self.controller.set_activity(selected)
-
-    def _delete_current_status(self):
-        current = (self.mode_combo.currentText() or '').strip()
-        if not current or current == self._add_status_label:
-            return
-        if current in self._status_defaults:
-            QtWidgets.QMessageBox.information(self, '提示', '預設狀態不可刪除。')
-            return
-        if current in self._status_options:
-            self._status_options.remove(current)
-            self._save_status_options()
-            self._rebuild_mode_combo()
-            fallback = self._status_defaults[0] if self._status_defaults else (self._status_options[0] if self._status_options else '')
-            if fallback:
-                self.mode_combo.blockSignals(True)
-                self.mode_combo.setCurrentText(fallback)
-                self.mode_combo.blockSignals(False)
-                self.controller.set_activity(fallback)
-
-    def _prompt_new_status(self):
-        dialog = QtWidgets.QInputDialog(self)
-        dialog.setWindowTitle('新增狀態')
-        dialog.setLabelText('請輸入新的狀態名稱：')
-        dialog.setTextValue('')
-        # keep input readable: black text on white field
-        dialog.setStyleSheet(
-            'QLabel { color: #111111; }'
-            'QLineEdit { color: #000000; background: #ffffff; border: 1px solid #888888; padding: 4px; }'
-            'QPushButton { color: #111111; background: #f0f0f0; border: 1px solid #999999; padding: 6px 10px; }'
-        )
-        ok = dialog.exec_() == QtWidgets.QDialog.Accepted
-        return dialog.textValue(), ok
-
-    def _build_pomodoro_editor(self):
-        panel = QtWidgets.QFrame()
-        panel.setObjectName('pomodoroCore')
-        layout = QtWidgets.QVBoxLayout(panel)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(14)
-
-        form = QtWidgets.QGridLayout()
-        time_label = QtWidgets.QLabel('工作時間(分鐘)')
-        time_label.setStyleSheet('font-size: 14pt; font-weight: 700;')
-        form.addWidget(time_label, 0, 0)
-        self.work_input = QtWidgets.QSpinBox()
-        self.work_input.setRange(0, 180)
-        self.work_input.setValue(25)
-        self.work_input.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
-        self.work_input.setMinimumHeight(96)
-        self.work_input.setStyleSheet('font-size: 42px; font-weight: 700;')
-        form.addWidget(self.work_input, 0, 1)
-        minute_text = QtWidgets.QLabel('MIN')
-        minute_text.setStyleSheet('font-size: 20px; font-weight: 700;')
-        form.addWidget(minute_text, 0, 2)
-        form.setColumnStretch(0, 1)
-        form.setColumnStretch(1, 2)
-        form.setColumnStretch(2, 1)
-        layout.addLayout(form)
-
-        btn_row = QtWidgets.QHBoxLayout()
-        btn_row.setSpacing(10)
-        self.toggle_btn = QtWidgets.QPushButton('開始')
-        self.reset_btn = QtWidgets.QPushButton('重開')
-        
-        # 按鈕樣式：有 hover 和 pressed 效果
-        btn_style = (
-            "font-size: 24px; font-weight: 800; background: rgba(7,16,29,205); "
-            "border:1px solid rgba(117,220,255,80); color: #e6fbff; border-radius:12px; "
-            "padding: 10px;"
-        )
-        btn_hover_pressed = (
-            "QPushButton:hover { background: rgba(33, 62, 95, 235); border: 1px solid rgba(168, 241, 255, 160); }"
-            "QPushButton:pressed { background: rgba(0, 200, 255, 150); border: 2px solid rgba(0, 255, 200, 255); }"
-        )
-        
-        for button in (self.toggle_btn, self.reset_btn):
-            button.setMinimumHeight(112)
-            button.setStyleSheet(btn_style + btn_hover_pressed)
-        btn_row.addWidget(self.toggle_btn)
-        btn_row.addWidget(self.reset_btn)
-        layout.addLayout(btn_row)
-
-        mode_row = QtWidgets.QHBoxLayout()
-        mode_row.setSpacing(8)
-        self.mode_combo = QtWidgets.QComboBox()
-        self.mode_combo.addItems(self._status_options)
-        self.mode_combo.addItem(self._add_status_label)
-        self.mode_combo.setMinimumHeight(62)
-        self.mode_combo.setStyleSheet('background: rgba(7,16,29,205); color: #effcff; padding: 8px; border-radius: 8px; font-size:16px;')
-        mode_row.addWidget(self.mode_combo, 1)
-        self.mode_delete_btn = QtWidgets.QPushButton('-')
-        self.mode_delete_btn.setFixedSize(62, 62)
-        self.mode_delete_btn.setStyleSheet('font-size: 28px; font-weight: 900; background: rgba(7,16,29,205); border:1px solid rgba(117,220,255,80); color: #e6fbff; border-radius:12px;')
-        mode_row.addWidget(self.mode_delete_btn)
-        layout.addLayout(mode_row)
-
-        stats_row = QtWidgets.QHBoxLayout()
-        stats_row.setSpacing(8)
-        self.stats_buttons = []
-        button_styles_unchecked = (
-            'font-size: 18px; font-weight: 800; background: rgba(7,16,29,205); '
-            'border:1px solid rgba(117,220,255,80); color: #e6fbff; border-radius:12px;'
-        )
-        button_styles_checked = (
-            'font-size: 18px; font-weight: 800; background: rgba(0,255,150,100); '
-            'border:2px solid rgba(0,255,150,255); color: #000000; border-radius:12px;'
-        )
-        # 只保留「當天」按鈕
-        button = QtWidgets.QPushButton('當天')
-        button.setMinimumHeight(54)
-        button.setStyleSheet(
-            button_styles_unchecked + 
-            f'\nQPushButton:checked {{ {button_styles_checked} }}'
-        )
-        button.setCheckable(True)
-        button.setChecked(True)
-        stats_row.addWidget(button)
-        self.stats_buttons.append(button)
-        stats_row.addStretch(1)
-        layout.addLayout(stats_row)
-
-        # === 圓餅圖面板（含日期導航） - 初始隱藏 ===
-        self.pie_container = QtWidgets.QFrame()
-        self.pie_container.setStyleSheet('background: rgba(7,16,29,180); border: 1px solid rgba(0,255,200,60); border-radius: 12px;')
-        self.pie_container.setMinimumHeight(860)
-        self.pie_container.hide()  # 初始隱藏
-        pie_layout = QtWidgets.QVBoxLayout(self.pie_container)
-        pie_layout.setContentsMargins(8, 8, 8, 8)  # 減少邊距
-        pie_layout.setSpacing(8)  # 減少間距
-
-        # 日期導航行
-        nav_row = QtWidgets.QHBoxLayout()
-        nav_row.setSpacing(6)
-
-        self.date_prev_btn = QtWidgets.QPushButton('◀ 前一天')
-        self.date_prev_btn.setMinimumSize(128, 38)
-        self.date_prev_btn.setMaximumWidth(128)
-        self.date_prev_btn.setFont(QtGui.QFont('Microsoft JhengHei', 20, QtGui.QFont.Bold))
-        self.date_prev_btn.setStyleSheet('padding: 5px 12px; font-size: 20px; font-weight: 700; background: rgba(0,150,255,80); border: 1px solid rgba(0,150,255,150); color: #fff; border-radius: 7px;')
-        nav_row.addWidget(self.date_prev_btn)
-
-        self.date_display = QtWidgets.QLabel('今日')
-        self.date_display.setAlignment(QtCore.Qt.AlignCenter)
-        self.date_display.setStyleSheet('font-size: 20px; font-weight: 700; color: #ffffff;')
-        nav_row.addWidget(self.date_display, 1)
-
-        self.date_next_btn = QtWidgets.QPushButton('後一天 ▶')
-        self.date_next_btn.setMinimumSize(128, 38)
-        self.date_next_btn.setMaximumWidth(128)
-        self.date_next_btn.setFont(QtGui.QFont('Microsoft JhengHei', 20, QtGui.QFont.Bold))
-        self.date_next_btn.setStyleSheet('padding: 5px 12px; font-size: 20px; font-weight: 700; background: rgba(0,150,255,80); border: 1px solid rgba(0,150,255,150); color: #fff; border-radius: 7px;')
-        nav_row.addWidget(self.date_next_btn)
-
-        pie_layout.addLayout(nav_row)
-
-        self.daily_pie_chart = DailyPieChart()
-        self.daily_pie_chart.setMinimumHeight(820)
-        pie_layout.addWidget(self.daily_pie_chart, 1)
-
-        layout.addWidget(self.pie_container, 2)
-
-        self.record_panel = QtWidgets.QFrame()
-        self.record_panel.setStyleSheet('background: rgba(7,16,29,180); border: 1px solid rgba(117,220,255,80); border-radius: 16px;')
-        record_layout = QtWidgets.QVBoxLayout(self.record_panel)
-        record_layout.setContentsMargins(12, 12, 12, 12)
-        record_layout.setSpacing(6)
-        self.record_title = QtWidgets.QLabel('本次紀錄')
-        self.record_title.setAlignment(QtCore.Qt.AlignCenter)
-        self.record_title.setStyleSheet('font-size: 16px; color: #ffffff; font-weight: 700;')
-        self.record_text = QtWidgets.QLabel('尚未產生紀錄')
-        self.record_text.setAlignment(QtCore.Qt.AlignCenter)
-        self.record_text.setWordWrap(True)
-        self.record_text.setStyleSheet('font-size: 36px; font-weight: 900; color: #ffffff;')
-        record_layout.addWidget(self.record_title)
-        record_layout.addWidget(self.record_text)
-        layout.addWidget(self.record_panel, 1)
-
-        # 初始化活動分配字典、查看日期和視圖模式
-        self.daily_allocations = {}  # {活動: 分鐘數}
-        self.viewing_date = datetime.now().date()  # 當前查看的日期
-        self._view_mode = 'day'  # 'day', 'week', 'month', 'year' - 必須先初始化
-        self._session_records_file = os.path.join(os.path.dirname(__file__), 'session_records.json')
-        # 追蹤上一次設置的分鐘數，只有改變時才重新設置
-        self._last_work_minutes = self.work_input.value()
-
-        # 連接信號槽
-        self.toggle_btn.clicked.connect(self._toggle_pomodoro)
-        self.reset_btn.clicked.connect(self._reset_pomodoro)
-        self.mode_combo.currentTextChanged.connect(self._on_mode_combo_changed)
-        self.mode_delete_btn.clicked.connect(self._delete_current_status)
-        self.date_prev_btn.clicked.connect(self._on_date_prev)
-        self.date_next_btn.clicked.connect(self._on_date_next)
-        self.stats_buttons[0].clicked.connect(self._on_show_today)      # 當天
-
-        # 初始化加載當日統計（但不顯示圓餅圖，除非點「當天」）
-        self._view_mode = 'day'
-
-        return panel
-
-    def _on_show_today(self):
-        """點擊當天按鈕 - 顯示圓餅圖並刷新"""
-        self._view_mode = 'day'
-        self.viewing_date = datetime.now().date()
-        self.date_prev_btn.show()
-        self.date_next_btn.show()
-        self.pie_container.show()  # 顯示圓餅圖容器
-        self._refresh_pie_chart()
-
-    def _on_date_prev(self):
-        """前一天"""
-        from datetime import timedelta
-        self.viewing_date -= timedelta(days=1)
-        self.pie_container.show()  # 確保容器顯示
-        self._refresh_pie_chart()
-
-    def _on_date_next(self):
-        """後一天"""
-        from datetime import timedelta
-        self.viewing_date += timedelta(days=1)
-        self.pie_container.show()  # 確保容器顯示
-        self._refresh_pie_chart()
-
-    def _refresh_pie_chart(self):
-        """刷新圓餅圖顯示"""
-        self._load_daily_statistics()
-        self._update_date_display()
-        self.daily_pie_chart.set_data(self.daily_allocations, self.viewing_date, self._view_mode)
-
-    def _update_date_display(self):
-        """更新日期顯示"""
-        today = datetime.now().date()
-        if self._view_mode == 'day':
-            if self.viewing_date == today:
-                date_text = '今日 ' + self.viewing_date.strftime('%Y年%m月%d日')
-            elif self.viewing_date == today - __import__('datetime').timedelta(days=1):
-                date_text = '昨日 ' + self.viewing_date.strftime('%Y年%m月%d日')
-            elif self.viewing_date == today + __import__('datetime').timedelta(days=1):
-                date_text = '明日 ' + self.viewing_date.strftime('%Y年%m月%d日')
-            else:
-                date_text = self.viewing_date.strftime('%Y年%m月%d日')
-        elif self._view_mode == 'week':
-            date_text = f'{today.strftime("%Y")} 年 第 {today.isocalendar()[1]} 週'
-        elif self._view_mode == 'month':
-            date_text = f'{today.strftime("%Y-%m")} 月'
-        elif self._view_mode == 'year':
-            date_text = f'{today.strftime("%Y")} 年'
-        else:
-            date_text = '統計'
-        self.date_display.setText(date_text)
-
-    def _load_daily_statistics(self):
-        """根據 view_mode 從 session_records.json 讀取統計"""
-        self.daily_allocations.clear()
-        try:
-            if os.path.isfile(self._session_records_file):
-                with open(self._session_records_file, 'r', encoding='utf-8') as f:
-                    records = json.load(f)
-                    if isinstance(records, list):
-                        for record in records:
-                            if isinstance(record, dict):
-                                timestamp_str = record.get('timestamp', '')
-                                if not timestamp_str:
-                                    continue
-                                try:
-                                    record_date = datetime.fromisoformat(timestamp_str.split('T')[0]).date()
-                                except Exception:
-                                    continue
-
-                                # 根據 view_mode 判斷是否包含此記錄
-                                should_include = False
-                                if self._view_mode == 'day':
-                                    should_include = record_date == self.viewing_date
-                                elif self._view_mode == 'week':
-                                    today = datetime.now().date()
-                                    target_week = today.isocalendar()[1]
-                                    target_year = today.isocalendar()[0]
-                                    record_week = record_date.isocalendar()[1]
-                                    record_year = record_date.isocalendar()[0]
-                                    should_include = (record_week == target_week and record_year == target_year)
-                                elif self._view_mode == 'month':
-                                    today = datetime.now().date()
-                                    should_include = (record_date.year == today.year and record_date.month == today.month)
-                                elif self._view_mode == 'year':
-                                    today = datetime.now().date()
-                                    should_include = record_date.year == today.year
-
-                                if should_include:
-                                    status = record.get('status', '')
-                                    seconds = record.get('seconds', 0)
-                                    if status and seconds > 0:
-                                        minutes = int(round(seconds / 60.0))
-                                        self.daily_allocations[status] = self.daily_allocations.get(status, 0) + minutes
-        except Exception:
-            pass
-
-    def _on_session_recorded(self, status_text, seconds, mode_name):
-        status_text = self._normalize_status_text(status_text)
-        if status_text == '讀書中':
-            status_text = '讀書'
-        elif status_text == '休息中':
-            status_text = '休息'
-        minutes = max(1, int(round(float(seconds) / 60.0))) if seconds > 0 else 0
-        self.record_text.setText(f'{status_text}\n{minutes} 分鐘')
-
-        # 無論什麼視圖模式都自動刷新圓餅圖
-        self._refresh_pie_chart()
-
-    def _toggle_pomodoro(self):
-        # 只有當用戶改變時間值時才重新設置
-        # 暫停後按開始會直接繼續，不重新設定
-        current_value = self.work_input.value()
-        if current_value != self._last_work_minutes:
-            # 時間值改變，重新設置
-            self.controller.set_work_minutes(current_value)
-            self._last_work_minutes = current_value
-            self.record_text.setText('尚未產生紀錄')
-        # 無論時間是否改變，都直接切換開始/暫停（繼續從暫停時間開始）
-        self.controller.toggle()
-
-    def _reset_pomodoro(self):
-        # 重開會重新設置時間
-        current_value = self.work_input.value()
-        self.controller.set_work_minutes(current_value)
-        self._last_work_minutes = current_value
-        self.controller.reset()
-
-    def _sync_controls(self, remaining_seconds, progress, running, activity_text):
-        self.toggle_btn.setText('暫停' if running else '開始')
-        normalized_activity = self._normalize_status_text(activity_text)
-        if normalized_activity and normalized_activity not in self._status_options and normalized_activity != self._add_status_label:
-            self._status_options.append(normalized_activity)
-            self._save_status_options()
-            self._rebuild_mode_combo()
-        idx = self.mode_combo.findText(normalized_activity)
-        if idx >= 0 and self.mode_combo.currentIndex() != idx:
-            self.mode_combo.blockSignals(True)
-            self.mode_combo.setCurrentIndex(idx)
-            self.mode_combo.blockSignals(False)
 
     def set_active(self, index):
         for i, button in enumerate(self.buttons):
@@ -1307,9 +997,62 @@ class MenuSageWindow(QtWidgets.QMainWindow):
             '',
             '待辦清單 尚未接上',
             '進度追蹤 尚未接上',
-            '行事曆 尚未接上',
+            '行事曆',
         ]
         self.menu_hint.setText(hints[index])
+        if index == 3:
+            try:
+                self.calendar_panel.show_month_view(emit_signal=False)
+            except Exception:
+                pass
+            if self.main_window is not None:
+                try:
+                    self.main_window.show_calendar_home()
+                except Exception:
+                    pass
+        else:
+            if self.main_window is not None:
+                try:
+                    self.main_window.set_mode_status('', False)
+                except Exception:
+                    pass
+                try:
+                    self.main_window.show_calendar_home()
+                except Exception:
+                    pass
+
+    def _enter_calendar_detail(self, selected_date=None):
+        if self.main_window is not None:
+            try:
+                date_value = selected_date or self.calendar_panel.selected_date()
+                events = self.calendar_panel.get_events_for_selected_date()
+                self.main_window.show_calendar_summary(date_value, events)
+                self.main_window.set_mode_status('', False)
+            except Exception:
+                pass
+
+    def _exit_calendar_detail(self):
+        if self.main_window is not None:
+            try:
+                self.main_window.show_calendar_home()
+            except Exception:
+                pass
+        try:
+            self.calendar_panel.show_month_view(emit_signal=False)
+        except Exception:
+            pass
+
+    def _sync_calendar_summary(self, date_value=None):
+        if self.main_window is None:
+            return
+        try:
+            if not self.calendar_panel.is_detail_view():
+                return
+            selected_date = date_value or self.calendar_panel.selected_date()
+            events = self.calendar_panel.get_events_for_selected_date()
+            self.main_window.show_calendar_summary(selected_date, events)
+        except Exception:
+            pass
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1326,15 +1069,75 @@ class MenuSageWindow(QtWidgets.QMainWindow):
         super().keyPressEvent(event)
 
 
-if __name__ == '__main__':
-    app = QtWidgets.QApplication([])
-    app.setFont(QtGui.QFont('Microsoft JhengHei', 10))
-    w = FinalSageWindow()
-    w.showFullScreen()
-    app.exec_()
-
-
 SageEvolutionWindow = FinalSageWindow
 SageWindow = FinalSageWindow
 MainWindow = FinalSageWindow
+
+
+def create_sage_windows(controller=None, compact_mode=False):
+    controller = controller or PomodoroController()
+    main_window = FinalSageWindow(controller=controller, compact_mode=compact_mode)
+    menu_window = MenuSageWindow(controller=controller, compact_mode=compact_mode, main_window=main_window)
+    return controller, main_window, menu_window
+
+
+def arrange_sage_windows(app, main_window, menu_window, compact_mode=False):
+    screens = list(app.screens()) if app is not None else []
+    if len(screens) >= 2:
+        for window, screen in ((main_window, screens[0]), (menu_window, screens[1])):
+            geometry = screen.availableGeometry()
+            window.setGeometry(geometry)
+            if window.windowHandle():
+                window.windowHandle().setScreen(screen)
+            window.showFullScreen()
+        main_window.raise_()
+        main_window.activateWindow()
+        return
+
+    screen = app.primaryScreen() if app is not None else None
+    geometry = screen.availableGeometry() if screen is not None else QtCore.QRect(0, 0, 1600, 900)
+    gap = max(12, geometry.width() // 120)
+    usable_width = max(1, geometry.width() - gap)
+
+    main_min = max(1, main_window.minimumWidth())
+    menu_min = max(1, menu_window.minimumWidth())
+
+    main_width = max(main_min, int(usable_width * 0.58))
+    menu_width = max(menu_min, usable_width - main_width)
+
+    if main_width + menu_width > usable_width:
+        menu_width = max(menu_min, usable_width - main_width)
+    if main_width + menu_width > usable_width:
+        main_width = max(main_min, usable_width - menu_width)
+
+    if main_width + menu_width > usable_width:
+        total_min = main_min + menu_min
+        if total_min > usable_width and total_min > 0:
+            ratio = main_min / total_min
+            main_width = max(1, int(usable_width * ratio))
+            menu_width = max(1, usable_width - main_width)
+        else:
+            main_width = max(1, usable_width // 2)
+            menu_width = max(1, usable_width - main_width)
+
+    main_geometry = QtCore.QRect(geometry.left(), geometry.top(), main_width, geometry.height())
+    menu_geometry = QtCore.QRect(geometry.left() + main_width + gap, geometry.top(), max(1, menu_width), geometry.height())
+
+    for window, win_geometry in ((main_window, main_geometry), (menu_window, menu_geometry)):
+        window.setGeometry(win_geometry)
+        window.showNormal()
+        if window.windowHandle() and screen is not None:
+            window.windowHandle().setScreen(screen)
+
+    main_window.raise_()
+    main_window.activateWindow()
+
+
+if __name__ == '__main__':
+    app = QtWidgets.QApplication([])
+    compact_mode = len(app.screens()) < 2
+    app.setFont(QtGui.QFont('Microsoft JhengHei', 9 if compact_mode else 10))
+    controller, w, menu_w = create_sage_windows(compact_mode=compact_mode)
+    arrange_sage_windows(app, w, menu_w, compact_mode=compact_mode)
+    app.exec_()
 
