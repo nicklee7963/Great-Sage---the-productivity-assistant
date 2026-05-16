@@ -801,13 +801,13 @@ class FinalSageWindow(QtWidgets.QMainWindow):
                     # Create label for each event
                     event_label = QtWidgets.QLabel(item_text)
                     event_label.setAlignment(QtCore.Qt.AlignCenter)
-                    event_label.setFont(QtGui.QFont('SimSun-ExtB', 20, QtGui.QFont.Bold))
+                    event_label.setFont(QtGui.QFont('SimSun-ExtB', 14, QtGui.QFont.Bold))
                     event_label.setStyleSheet('color: #ffffff; letter-spacing: 2px;')
                     self.calendar_items_layout.addWidget(event_label)
             else:
                 empty_label = QtWidgets.QLabel('這一天還沒有安排')
                 empty_label.setAlignment(QtCore.Qt.AlignCenter)
-                empty_label.setFont(QtGui.QFont('SimSun-ExtB', 20, QtGui.QFont.Bold))
+                empty_label.setFont(QtGui.QFont('SimSun-ExtB', 14, QtGui.QFont.Bold))
                 empty_label.setStyleSheet('color: #ffffff; letter-spacing: 2px;')
                 self.calendar_items_layout.addWidget(empty_label)
             

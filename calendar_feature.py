@@ -66,6 +66,10 @@ class CalendarEventStore:
         key = self._date_key(date_value)
         return [dict(event) for event in self._events_by_date.get(key, [])]
 
+    def has_events_for_date(self, date_value):
+        key = self._date_key(date_value)
+        return bool(self._events_by_date.get(key, []))
+
     def set_events_for_date(self, date_value, events):
         key = self._date_key(date_value)
         normalized = []
@@ -424,6 +428,7 @@ class CalendarPanel(QtWidgets.QFrame):
             button.setEnabled(True)
             button.setText(str(day))
             item_date = datetime(year, month, day).date()
+            has_events = self.store.has_events_for_date(item_date)
             styles = [
                 "QPushButton {",
                 " background: rgba(9,18,31,140);",
@@ -433,6 +438,8 @@ class CalendarPanel(QtWidgets.QFrame):
                 " padding: 4px;",
                 "}",
             ]
+            if has_events:
+                styles.append("QPushButton { background: rgba(0,150,255,95); color: #ffffff; border: 1px solid rgba(0,242,255,180); }")
             if item_date == self._selected_date:
                 styles.append("QPushButton { background: rgba(0,242,255,130); color: #000000; border: 2px solid rgba(0,242,255,240); }")
             styles.append("QPushButton:hover { background: rgba(0,150,255,85); border: 1px solid rgba(117,220,255,130); }")

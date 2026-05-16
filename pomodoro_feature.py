@@ -1,6 +1,6 @@
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from PyQt5 import QtWidgets, QtCore, QtGui, QtMultimedia
 
@@ -115,6 +115,430 @@ class DailyPieChart(QtWidgets.QWidget):
             painter.drawText(int(legend_x + legend_swatch + 6), legend_y, legend_width - legend_swatch - 6, legend_item_height,
                              QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, label_text)
             legend_y += legend_item_height
+
+
+class WeeklyStackedBarChart(QtWidgets.QWidget):
+    """顯示週、月或年各類別專注時間的疊加長條圖。"""
+
+    def __init__(self, parent=None, compact_mode=False):
+        super().__init__(parent)
+        self.compact_mode = compact_mode
+        self.data = {}
+        self.selected_category = None  # None means show all categories
+        self.view_mode = 'week'  # 'week', 'month', or 'year'
+        self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+        self.setMinimumSize(540 if compact_mode else 720, 420 if compact_mode else 520)
+        self.setMinimumHeight(320)
+        self.current_date = datetime.now().date()
+
+    def set_data(self, activities_data, date=None, view_mode='week'):
+        self.data = activities_data or {}
+        self.view_mode = view_mode
+        if date:
+            self.current_date = date
+        self.update()
+
+    def set_category_filter(self, category):
+        """Set category filter. None means show all categories (綜合)."""
+        self.selected_category = category
+        self.update()
+
+    def _total_minutes(self):
+        total = 0
+        for day_data in self.data.values():
+            if isinstance(day_data, dict):
+                total += sum(value for value in day_data.values() if isinstance(value, (int, float)))
+        return total
+
+    def paintEvent(self, event):
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+
+        margin_x = 18 if self.compact_mode else 26
+        margin_y = 16 if self.compact_mode else 22
+        rect = self.rect().adjusted(margin_x, margin_y, -margin_x, -margin_y)
+
+        title_height = 34 if self.compact_mode else 42
+        painter.setPen(QtGui.QColor(255, 255, 255))
+        painter.setFont(QtGui.QFont('Microsoft JhengHei', _ui_size(16, 13, self.compact_mode), QtGui.QFont.Bold))
+        
+        # For year view, draw year bar chart; otherwise, draw regular bar chart
+        if self.view_mode == 'year':
+            self._paint_year_bar_chart(painter, rect, title_height)
+        else:
+            self._paint_bar_chart(painter, rect, title_height)
+
+    def _paint_bar_chart(self, painter, rect, title_height):
+        """Draw bar chart for week/month views"""
+        # Generate title and dates based on view_mode
+        if self.view_mode == 'month':
+            month_start = self.current_date.replace(day=1)
+            # Find last day of month
+            if self.current_date.month == 12:
+                month_end = (month_start.replace(year=self.current_date.year + 1, month=1) - timedelta(days=1))
+            else:
+                month_end = (month_start.replace(month=self.current_date.month + 1) - timedelta(days=1))
+            if self.selected_category:
+                title_text = f'{self.current_date.strftime("%Y年%m月")} {self.selected_category}'
+            else:
+                title_text = f'{self.current_date.strftime("%Y年%m月")} 綜合專注分布'
+            days_in_month = (month_end - month_start).days + 1
+            date_range = [month_start + timedelta(days=i) for i in range(days_in_month)]
+        else:  # week mode
+            week_start = self.current_date - timedelta(days=self.current_date.weekday())
+            week_end = week_start + timedelta(days=6)
+            if self.selected_category:
+                title_text = f'{week_start.strftime("%Y/%m/%d")} - {week_end.strftime("%Y/%m/%d")} {self.selected_category}'
+            else:
+                title_text = f'{week_start.strftime("%Y/%m/%d")} - {week_end.strftime("%Y/%m/%d")} 綜合專注分布'
+            date_range = [week_start + timedelta(days=i) for i in range(7)]
+        
+        painter.drawText(rect.left(), rect.top(), rect.width(), title_height, QtCore.Qt.AlignCenter, title_text)
+
+        chart_top = rect.top() + title_height + 18
+        chart_height = max(220, int(rect.height() * (0.65 if self.compact_mode else 0.72)))
+        bar_rect = QtCore.QRectF(rect.left(), chart_top, rect.width(), chart_height)
+
+        if not self.data or self._total_minutes() <= 0:
+            painter.setFont(QtGui.QFont('Microsoft JhengHei', _ui_size(18, 12, self.compact_mode), QtGui.QFont.Bold))
+            view_text = '本週' if self.view_mode == 'week' else '本月'
+            painter.drawText(rect, QtCore.Qt.AlignCenter, f'{view_text}暫無統計數據')
+            return
+
+        # Get day labels based on view_mode
+        if self.view_mode == 'month':
+            day_labels = [str(d.day) for d in date_range]  # 1-31
+        else:
+            day_labels = ['一', '二', '三', '四', '五', '六', '日']
+
+        all_categories = []
+        for day_data in self.data.values():
+            if isinstance(day_data, dict):
+                for activity in day_data.keys():
+                    if activity not in all_categories:
+                        all_categories.append(activity)
+        
+        # Filter categories based on selection
+        if self.selected_category:
+            sorted_categories = [self.selected_category] if self.selected_category in all_categories else []
+        else:
+            sorted_categories = sorted(all_categories, key=lambda activity: sum((self.data.get(day.isoformat(), {}) or {}).get(activity, 0) for day in date_range), reverse=True)
+
+        x_padding = 18 if self.compact_mode else 26
+        chart_left = bar_rect.left() + x_padding
+        chart_right = bar_rect.right() - x_padding
+        chart_bottom = bar_rect.bottom() - 34
+        chart_top_inner = bar_rect.top() + 10
+        usable_width = max(1.0, chart_right - chart_left)
+        num_days = len(date_range)
+        slot_width = usable_width / num_days
+        bar_width = slot_width * 0.58
+        
+        # Calculate max daily total based on filter
+        if self.selected_category:
+            max_daily_total = max((self.data.get(day.isoformat(), {}) or {}).get(self.selected_category, 0) for day in date_range)
+        else:
+            max_daily_total = max((sum((self.data.get(day.isoformat(), {}) or {}).values()) for day in date_range), default=0)
+        max_daily_total = max(1, max_daily_total)
+
+        painter.setFont(QtGui.QFont('Microsoft JhengHei', _ui_size(10, 8, self.compact_mode), QtGui.QFont.Bold))
+        for index, day in enumerate(date_range):
+            day_key = day.isoformat()
+            day_data = self.data.get(day_key, {}) or {}
+            
+            # Calculate total minutes based on filter
+            if self.selected_category:
+                total_minutes = day_data.get(self.selected_category, 0)
+            else:
+                total_minutes = sum(day_data.values())
+            
+            bar_height = max(2.0, (chart_bottom - chart_top_inner) * (total_minutes / max_daily_total))
+            bar_left = chart_left + index * slot_width + (slot_width - bar_width) / 2
+            bar_top = chart_bottom - bar_height
+            bar_body = QtCore.QRectF(bar_left, bar_top, bar_width, bar_height)
+
+            if total_minutes > 0:
+                if self.selected_category:
+                    # Draw single category bar
+                    segment_rect = QtCore.QRectF(bar_left, bar_top, bar_width, bar_height)
+                    painter.setPen(QtCore.Qt.NoPen)
+                    painter.setBrush(get_neon_color(self.selected_category))
+                    painter.drawRect(segment_rect)
+                else:
+                    # Draw stacked categories
+                    current_y = chart_bottom
+                    sorted_day_items = sorted(day_data.items(), key=lambda item: item[1], reverse=True)
+                    for activity, minutes in sorted_day_items:
+                        if minutes <= 0:
+                            continue
+                        segment_height = bar_height * (minutes / total_minutes)
+                        segment_rect = QtCore.QRectF(bar_left, current_y - segment_height, bar_width, segment_height)
+                        painter.setPen(QtCore.Qt.NoPen)
+                        painter.setBrush(get_neon_color(activity))
+                        painter.drawRect(segment_rect)
+                        current_y -= segment_height
+
+            painter.setPen(QtGui.QColor(255, 255, 255))
+            painter.drawText(QtCore.QRectF(bar_left - 8, chart_bottom + 4, bar_width + 16, 18),
+                             QtCore.Qt.AlignCenter, f'{day_labels[index]}')
+            if self.view_mode == 'week':
+                painter.setPen(QtGui.QColor(127, 220, 255))
+                painter.drawText(QtCore.QRectF(bar_left - 10, chart_bottom + 28, bar_width + 20, 18),
+                                 QtCore.Qt.AlignCenter, day.strftime('%m/%d'))
+
+        legend_top = int(bar_rect.bottom() + 32)
+        legend_item_height = 22 if self.compact_mode else 26
+        legend_x = rect.left()
+        legend_width = rect.width()
+        legend_item_width = max(1, int(legend_width / max(1, len(sorted_categories))))
+        painter.setFont(QtGui.QFont('Microsoft JhengHei', _ui_size(11, 9, self.compact_mode), QtGui.QFont.Bold))
+
+        for index, activity in enumerate(sorted_categories):
+            total_minutes = sum((self.data.get(day.isoformat(), {}) or {}).get(activity, 0) for day in date_range)
+            if total_minutes <= 0:
+                continue
+            item_x = legend_x + index * legend_item_width
+            color = get_neon_color(activity)
+            painter.setBrush(color)
+            painter.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 180), 1))
+            painter.drawRect(QtCore.QRectF(item_x, legend_top + 4, 14, 14))
+            painter.setPen(QtGui.QColor(255, 255, 255))
+            label_text = f'{activity} {total_minutes}m'
+            painter.drawText(item_x + 20, legend_top, legend_item_width - 20, legend_item_height,
+                             QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, label_text)
+
+    def _paint_year_line_chart(self, painter, rect, title_height):
+        """Draw line chart for year view"""
+        painter.setPen(QtGui.QColor(255, 255, 255))
+        painter.setFont(QtGui.QFont('Microsoft JhengHei', _ui_size(16, 13, self.compact_mode), QtGui.QFont.Bold))
+        
+        if self.selected_category:
+            title_text = f'{self.current_date.strftime("%Y年")} {self.selected_category}'
+        else:
+            title_text = f'{self.current_date.strftime("%Y年")} 綜合專注分布'
+        painter.drawText(rect.left(), rect.top(), rect.width(), title_height, QtCore.Qt.AlignCenter, title_text)
+
+        chart_top = rect.top() + title_height + 18
+        chart_height = max(220, int(rect.height() * (0.65 if self.compact_mode else 0.72)))
+        chart_rect = QtCore.QRectF(rect.left(), chart_top, rect.width(), chart_height)
+
+        if not self.data or self._total_minutes() <= 0:
+            painter.setFont(QtGui.QFont('Microsoft JhengHei', _ui_size(18, 12, self.compact_mode), QtGui.QFont.Bold))
+            painter.drawText(rect, QtCore.Qt.AlignCenter, '本年暫無統計數據')
+            return
+
+        # Collect all categories
+        all_categories = []
+        for day_data in self.data.values():
+            if isinstance(day_data, dict):
+                for activity in day_data.keys():
+                    if activity not in all_categories:
+                        all_categories.append(activity)
+        
+        # Filter categories based on selection
+        if self.selected_category:
+            sorted_categories = [self.selected_category] if self.selected_category in all_categories else []
+        else:
+            sorted_categories = sorted(all_categories, key=lambda activity: sum((self.data.get(k, {}) or {}).get(activity, 0) for k in self.data.keys()), reverse=True)
+
+        if not sorted_categories:
+            painter.setFont(QtGui.QFont('Microsoft JhengHei', _ui_size(18, 12, self.compact_mode), QtGui.QFont.Bold))
+            painter.drawText(rect, QtCore.Qt.AlignCenter, '本年暫無統計數據')
+            return
+
+        x_padding = 18 if self.compact_mode else 26
+        chart_left = chart_rect.left() + x_padding
+        chart_right = chart_rect.right() - x_padding
+        chart_bottom = chart_rect.bottom() - 20
+        chart_top_inner = chart_rect.top() + 10
+        usable_width = max(1.0, chart_right - chart_left)
+        num_months = 12
+        slot_width = usable_width / num_months
+
+        # Calculate max monthly total
+        if self.selected_category:
+            max_monthly_total = max((self.data.get(k, {}) or {}).get(self.selected_category, 0) for k in self.data.keys())
+        else:
+            max_monthly_total = max((sum((self.data.get(k, {}) or {}).values()) for k in self.data.keys()), default=0)
+        max_monthly_total = max(1, max_monthly_total)
+
+        # Draw lines for each category
+        month_x_positions = [chart_left + i * slot_width + slot_width / 2 for i in range(num_months)]
+        
+        for activity in sorted_categories:
+            color = get_neon_color(activity)
+            painter.setPen(QtGui.QPen(color, 2.5))
+            
+            points = []
+            for month_idx in range(1, 13):
+                month_date = self.current_date.replace(month=month_idx, day=1)
+                month_key = month_date.isoformat()
+                month_data = self.data.get(month_key, {}) or {}
+                
+                if self.selected_category:
+                    total_minutes = month_data.get(self.selected_category, 0)
+                else:
+                    total_minutes = month_data.get(activity, 0)
+                
+                y_pos = chart_bottom - (chart_bottom - chart_top_inner) * (total_minutes / max_monthly_total)
+                x_pos = month_x_positions[month_idx - 1]
+                points.append(QtCore.QPointF(x_pos, y_pos))
+            
+            # Draw line
+            for i in range(len(points) - 1):
+                painter.drawLine(points[i], points[i + 1])
+            
+            # Draw dots at data points
+            for point in points:
+                painter.setBrush(color)
+                painter.setPen(QtGui.QPen(color, 1))
+                painter.drawEllipse(point, 4, 4)
+
+        # Draw month labels (only numbers 1-12)
+        painter.setFont(QtGui.QFont('Microsoft JhengHei', _ui_size(10, 8, self.compact_mode), QtGui.QFont.Bold))
+        painter.setPen(QtGui.QColor(255, 255, 255))
+        for i in range(num_months):
+            x_pos = month_x_positions[i]
+            label_text = str(i + 1)
+            painter.drawText(QtCore.QRectF(x_pos - 12, chart_bottom + 8, 24, 18),
+                             QtCore.Qt.AlignCenter, label_text)
+
+        # Draw legend
+        legend_top = int(chart_rect.bottom() + 20)
+        legend_item_height = 22 if self.compact_mode else 26
+        legend_x = rect.left()
+        legend_width = rect.width()
+        legend_item_width = max(1, int(legend_width / max(1, len(sorted_categories))))
+        painter.setFont(QtGui.QFont('Microsoft JhengHei', _ui_size(11, 9, self.compact_mode), QtGui.QFont.Bold))
+
+        for index, activity in enumerate(sorted_categories):
+            total_minutes = sum((self.data.get(k, {}) or {}).get(activity, 0) for k in self.data.keys())
+            item_x = legend_x + index * legend_item_width
+            color = get_neon_color(activity)
+            painter.setBrush(color)
+            painter.setPen(QtGui.QPen(color, 1))
+            painter.drawRect(QtCore.QRectF(item_x, legend_top + 4, 14, 14))
+            painter.setPen(QtGui.QColor(255, 255, 255))
+            label_text = f'{activity} {total_minutes}m'
+            painter.drawText(item_x + 20, legend_top, legend_item_width - 20, legend_item_height,
+                             QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, label_text)
+
+    def _paint_year_bar_chart(self, painter, rect, title_height):
+        """Draw yearly bar chart with all days of the year, each day showing categories (no x-axis labels)"""
+        painter.setPen(QtGui.QColor(255, 255, 255))
+        painter.setFont(QtGui.QFont('Microsoft JhengHei', _ui_size(16, 13, self.compact_mode), QtGui.QFont.Bold))
+        
+        if self.selected_category:
+            title_text = f'{self.current_date.strftime("%Y年")} {self.selected_category}'
+        else:
+            title_text = f'{self.current_date.strftime("%Y年")} 綜合專注分布'
+        painter.drawText(rect.left(), rect.top(), rect.width(), title_height, QtCore.Qt.AlignCenter, title_text)
+
+        chart_top = rect.top() + title_height + 18
+        chart_height = max(220, int(rect.height() * (0.65 if self.compact_mode else 0.72)))
+        bar_rect = QtCore.QRectF(rect.left(), chart_top, rect.width(), chart_height)
+
+        if not self.data or self._total_minutes() <= 0:
+            painter.setFont(QtGui.QFont('Microsoft JhengHei', _ui_size(18, 12, self.compact_mode), QtGui.QFont.Bold))
+            painter.drawText(rect, QtCore.Qt.AlignCenter, '本年暫無統計數據')
+            return
+
+        # Get all days in current year
+        year_start = self.current_date.replace(month=1, day=1)
+        if year_start.year % 4 == 0 and (year_start.year % 100 != 0 or year_start.year % 400 == 0):
+            days_in_year = 366
+        else:
+            days_in_year = 365
+        date_range = [year_start + timedelta(days=i) for i in range(days_in_year)]
+
+        # Collect all categories
+        all_categories = []
+        for day_data in self.data.values():
+            if isinstance(day_data, dict):
+                for activity in day_data.keys():
+                    if activity not in all_categories:
+                        all_categories.append(activity)
+        
+        # Filter categories based on selection
+        if self.selected_category:
+            sorted_categories = [self.selected_category] if self.selected_category in all_categories else []
+        else:
+            sorted_categories = sorted(all_categories, key=lambda activity: sum((self.data.get(day.isoformat(), {}) or {}).get(activity, 0) for day in date_range), reverse=True)
+
+        x_padding = 18 if self.compact_mode else 26
+        chart_left = bar_rect.left() + x_padding
+        chart_right = bar_rect.right() - x_padding
+        chart_bottom = bar_rect.bottom() - 8
+        chart_top_inner = bar_rect.top() + 10
+        usable_width = max(1.0, chart_right - chart_left)
+        num_days = len(date_range)
+        slot_width = usable_width / num_days
+        bar_width = max(1.0, slot_width * 0.85)
+        
+        # Calculate max daily total based on filter
+        if self.selected_category:
+            max_daily_total = max((self.data.get(day.isoformat(), {}) or {}).get(self.selected_category, 0) for day in date_range)
+        else:
+            max_daily_total = max((sum((self.data.get(day.isoformat(), {}) or {}).values()) for day in date_range), default=0)
+        max_daily_total = max(1, max_daily_total)
+
+        # Draw bars for each day (no x-axis labels)
+        for index, day in enumerate(date_range):
+            day_key = day.isoformat()
+            day_data = self.data.get(day_key, {}) or {}
+            
+            # Calculate total minutes based on filter
+            if self.selected_category:
+                total_minutes = day_data.get(self.selected_category, 0)
+            else:
+                total_minutes = sum(day_data.values())
+            
+            if total_minutes > 0:
+                bar_height = max(2.0, (chart_bottom - chart_top_inner) * (total_minutes / max_daily_total))
+                bar_left = chart_left + index * slot_width + (slot_width - bar_width) / 2
+                bar_top = chart_bottom - bar_height
+
+                if self.selected_category:
+                    # Draw single category bar
+                    segment_rect = QtCore.QRectF(bar_left, bar_top, bar_width, bar_height)
+                    painter.setPen(QtCore.Qt.NoPen)
+                    painter.setBrush(get_neon_color(self.selected_category))
+                    painter.drawRect(segment_rect)
+                else:
+                    # Draw stacked categories
+                    current_y = chart_bottom
+                    sorted_day_items = sorted(day_data.items(), key=lambda item: item[1], reverse=True)
+                    for activity, minutes in sorted_day_items:
+                        if minutes <= 0:
+                            continue
+                        segment_height = bar_height * (minutes / total_minutes)
+                        segment_rect = QtCore.QRectF(bar_left, current_y - segment_height, bar_width, segment_height)
+                        painter.setPen(QtCore.Qt.NoPen)
+                        painter.setBrush(get_neon_color(activity))
+                        painter.drawRect(segment_rect)
+                        current_y -= segment_height
+
+        # Draw legend (no x-axis labels for year view)
+        legend_top = int(bar_rect.bottom() + 12)
+        legend_item_height = 22 if self.compact_mode else 26
+        legend_x = rect.left()
+        legend_width = rect.width()
+        legend_item_width = max(1, int(legend_width / max(1, len(sorted_categories))))
+        painter.setFont(QtGui.QFont('Microsoft JhengHei', _ui_size(11, 9, self.compact_mode), QtGui.QFont.Bold))
+
+        for index, activity in enumerate(sorted_categories):
+            total_minutes = sum((self.data.get(day.isoformat(), {}) or {}).get(activity, 0) for day in date_range)
+            if total_minutes <= 0:
+                continue
+            item_x = legend_x + index * legend_item_width
+            color = get_neon_color(activity)
+            painter.setBrush(color)
+            painter.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 180), 1))
+            painter.drawRect(QtCore.QRectF(item_x, legend_top + 4, 14, 14))
+            painter.setPen(QtGui.QColor(255, 255, 255))
+            label_text = f'{activity} {total_minutes}m'
+            painter.drawText(item_x + 20, legend_top, legend_item_width - 20, legend_item_height,
+                             QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, label_text)
 
 
 class PomodoroController(QtCore.QObject):
@@ -331,6 +755,7 @@ class PomodoroPanel(QtWidgets.QFrame):
         self._status_options = self._load_status_options()
         self._view_mode = 'day'
         self.daily_allocations = {}
+        self.weekly_allocations = {}
         self.viewing_date = datetime.now().date()
         self._session_records_file = os.path.join(os.path.dirname(__file__), 'session_records.json')
         self._last_work_minutes = 25
@@ -371,7 +796,7 @@ class PomodoroPanel(QtWidgets.QFrame):
         self.toggle_btn = QtWidgets.QPushButton('開始')
         self.reset_btn = QtWidgets.QPushButton('重開')
         btn_style = (
-            f"font-size: {_ui_size(24, 20, self.compact_mode)}px; font-weight: 800; background: rgba(7,16,29,205); "
+            f"font-size: {_ui_size(10, 10, self.compact_mode)}px; font-weight: 800; background: rgba(7,16,29,205); "
             "border:1px solid rgba(117,220,255,80); color: #e6fbff; border-radius:12px; "
             "padding: 10px;"
         )
@@ -404,21 +829,50 @@ class PomodoroPanel(QtWidgets.QFrame):
         stats_row.setSpacing(8)
         self.stats_buttons = []
         button_styles_unchecked = (
-            f'font-size: {_ui_size(18, 16, self.compact_mode)}px; font-weight: 800; background: rgba(7,16,29,205); '
-            'border:1px solid rgba(117,220,255,80); color: #e6fbff; border-radius:12px;'
+            f'QPushButton {{ font-size: {_ui_size(18, 16, self.compact_mode)}px; font-weight: 800; '
+            'background: rgba(7,16,29,205); border:1px solid rgba(117,220,255,80); color: #e6fbff; border-radius:12px; }}'
         )
         button_styles_checked = (
-            f'font-size: {_ui_size(18, 16, self.compact_mode)}px; font-weight: 800; background: rgba(0,255,150,100); '
-            'border:2px solid rgba(0,255,150,255); color: #000000; border-radius:12px;'
+            f'QPushButton:checked {{ font-size: {_ui_size(18, 16, self.compact_mode)}px; font-weight: 800; '
+            'background: rgba(0,255,150,100); border:2px solid rgba(0,255,150,255); color: #000000; border-radius:12px; }}'
         )
         button = QtWidgets.QPushButton('當天')
         button.setMinimumHeight(48 if self.compact_mode else 54)
-        button.setStyleSheet(button_styles_unchecked + f'\nQPushButton:checked {{ {button_styles_checked} }}')
+        button.setStyleSheet(button_styles_unchecked + '\n' + button_styles_checked)
         button.setCheckable(True)
         button.setChecked(True)
         stats_row.addWidget(button)
         self.stats_buttons.append(button)
+        self.week_button = QtWidgets.QPushButton('本週')
+        self.week_button.setMinimumHeight(48 if self.compact_mode else 54)
+        self.week_button.setStyleSheet(button_styles_unchecked + '\n' + button_styles_checked)
+        self.week_button.setCheckable(True)
+        stats_row.addWidget(self.week_button)
+        self.stats_buttons.append(self.week_button)
+        
+        self.month_button = QtWidgets.QPushButton('當月')
+        self.month_button.setMinimumHeight(48 if self.compact_mode else 54)
+        self.month_button.setStyleSheet(button_styles_unchecked + '\n' + button_styles_checked)
+        self.month_button.setCheckable(True)
+        stats_row.addWidget(self.month_button)
+        self.stats_buttons.append(self.month_button)
+        
+        self.year_button = QtWidgets.QPushButton('當年')
+        self.year_button.setMinimumHeight(48 if self.compact_mode else 54)
+        self.year_button.setStyleSheet(button_styles_unchecked + '\n' + button_styles_checked)
+        self.year_button.setCheckable(True)
+        stats_row.addWidget(self.year_button)
+        self.stats_buttons.append(self.year_button)
+        
         stats_row.addStretch(1)
+        
+        # Add category filter combo for weekly view
+        self.category_combo = QtWidgets.QComboBox()
+        self.category_combo.setMinimumHeight(48 if self.compact_mode else 54)
+        self.category_combo.setMaximumWidth(200 if self.compact_mode else 240)
+        self.category_combo.setStyleSheet(f'background: rgba(7,16,29,205); color: #effcff; padding: 8px; border-radius: 8px; font-size:{_ui_size(16, 14, self.compact_mode)}px; border:1px solid rgba(117,220,255,80);')
+        self.category_combo.hide()
+        stats_row.addWidget(self.category_combo)
         layout.addLayout(stats_row)
 
         self.pie_container = QtWidgets.QFrame()
@@ -455,24 +909,13 @@ class PomodoroPanel(QtWidgets.QFrame):
 
         self.daily_pie_chart = DailyPieChart(compact_mode=self.compact_mode)
         self.daily_pie_chart.setMinimumHeight(560 if self.compact_mode else 820)
-        pie_layout.addWidget(self.daily_pie_chart, 1)
+        self.weekly_bar_chart = WeeklyStackedBarChart(compact_mode=self.compact_mode)
+        self.weekly_bar_chart.setMinimumHeight(560 if self.compact_mode else 820)
+        self.chart_stack = QtWidgets.QStackedWidget()
+        self.chart_stack.addWidget(self.daily_pie_chart)
+        self.chart_stack.addWidget(self.weekly_bar_chart)
+        pie_layout.addWidget(self.chart_stack, 1)
         layout.addWidget(self.pie_container, 2)
-
-        self.record_panel = QtWidgets.QFrame()
-        self.record_panel.setStyleSheet('background: rgba(7,16,29,180); border: 1px solid rgba(117,220,255,80); border-radius: 16px;')
-        record_layout = QtWidgets.QVBoxLayout(self.record_panel)
-        record_layout.setContentsMargins(12, 12, 12, 12)
-        record_layout.setSpacing(6)
-        self.record_title = QtWidgets.QLabel('本次紀錄')
-        self.record_title.setAlignment(QtCore.Qt.AlignCenter)
-        self.record_title.setStyleSheet(f'font-size: {_ui_size(16, 14, self.compact_mode)}px; color: #ffffff; font-weight: 700;')
-        self.record_text = QtWidgets.QLabel('尚未產生紀錄')
-        self.record_text.setAlignment(QtCore.Qt.AlignCenter)
-        self.record_text.setWordWrap(True)
-        self.record_text.setStyleSheet(f'font-size: {_ui_size(36, 28, self.compact_mode)}px; font-weight: 900; color: #ffffff;')
-        record_layout.addWidget(self.record_title)
-        record_layout.addWidget(self.record_text)
-        layout.addWidget(self.record_panel, 1)
 
         self.toggle_btn.clicked.connect(self._toggle_pomodoro)
         self.reset_btn.clicked.connect(self._reset_pomodoro)
@@ -481,7 +924,12 @@ class PomodoroPanel(QtWidgets.QFrame):
         self.date_prev_btn.clicked.connect(self._on_date_prev)
         self.date_next_btn.clicked.connect(self._on_date_next)
         self.stats_buttons[0].clicked.connect(self._on_show_today)
+        self.week_button.clicked.connect(self._on_show_week)
+        self.month_button.clicked.connect(self._on_show_month)
+        self.year_button.clicked.connect(self._on_show_year)
+        self.category_combo.currentTextChanged.connect(self._on_category_changed)
         self._view_mode = 'day'
+        self._populate_category_combo()
 
     def _load_status_options(self):
         options = list(self._status_defaults)
@@ -554,10 +1002,14 @@ class PomodoroPanel(QtWidgets.QFrame):
                 self._status_options.append(new_text)
                 self._save_status_options()
             self._rebuild_mode_combo()
+            self._populate_category_combo()  # 立即同步週圖表的類別列表
             self.mode_combo.blockSignals(True)
             self.mode_combo.setCurrentText(new_text)
             self.mode_combo.blockSignals(False)
             self.controller.set_activity(new_text)
+            # 如果當前在週視圖，自動選中新增的活動
+            if self._view_mode == 'week':
+                self._sync_category_combo_to_activity(new_text)
             return
 
         self.controller.set_activity(selected)
@@ -573,6 +1025,7 @@ class PomodoroPanel(QtWidgets.QFrame):
             self._status_options.remove(current)
             self._save_status_options()
             self._rebuild_mode_combo()
+            self._populate_category_combo()
             fallback = self._status_defaults[0] if self._status_defaults else (self._status_options[0] if self._status_options else '')
             if fallback:
                 self.mode_combo.blockSignals(True)
@@ -603,20 +1056,102 @@ class PomodoroPanel(QtWidgets.QFrame):
     def _on_show_today(self):
         self._view_mode = 'day'
         self.viewing_date = datetime.now().date()
+        self.date_prev_btn.setText('◀ 前一天')
+        self.date_next_btn.setText('後一天 ▶')
         self.date_prev_btn.show()
         self.date_next_btn.show()
+        self.category_combo.hide()
+        self.chart_stack.setCurrentWidget(self.daily_pie_chart)
+        self.stats_buttons[0].setChecked(True)
+        self.week_button.setChecked(False)
+        self.month_button.setChecked(False)
+        self.year_button.setChecked(False)
+        self.pie_container.show()
+        self._refresh_pie_chart()
+
+    def _on_show_week(self):
+        self._view_mode = 'week'
+        self.viewing_date = datetime.now().date()
+        self.date_prev_btn.setText('◀ 前一周')
+        self.date_next_btn.setText('後一周 ▶')
+        self.date_prev_btn.show()
+        self.date_next_btn.show()
+        self.category_combo.show()
+        self.chart_stack.setCurrentWidget(self.weekly_bar_chart)
+        self.stats_buttons[0].setChecked(False)
+        self.week_button.setChecked(True)
+        self.month_button.setChecked(False)
+        self.year_button.setChecked(False)
+        self.pie_container.show()
+        # 同步當前活動到類別下拉框
+        current_activity = getattr(self.controller, 'activity_text', None)
+        if current_activity:
+            self._sync_category_combo_to_activity(current_activity)
+        self._refresh_pie_chart()
+
+    def _on_show_month(self):
+        self._view_mode = 'month'
+        self.viewing_date = datetime.now().date()
+        self.date_prev_btn.setText('◀ 前一月')
+        self.date_next_btn.setText('後一月 ▶')
+        self.date_prev_btn.show()
+        self.date_next_btn.show()
+        self.category_combo.show()
+        self.chart_stack.setCurrentWidget(self.weekly_bar_chart)
+        self.stats_buttons[0].setChecked(False)
+        self.week_button.setChecked(False)
+        self.month_button.setChecked(True)
+        self.year_button.setChecked(False)
+        self.pie_container.show()
+        self._refresh_pie_chart()
+
+    def _on_show_year(self):
+        self._view_mode = 'year'
+        self.viewing_date = datetime.now().date()
+        self.date_prev_btn.setText('◀ 前一年')
+        self.date_next_btn.setText('後一年 ▶')
+        self.date_prev_btn.show()
+        self.date_next_btn.show()
+        self.category_combo.show()
+        self.chart_stack.setCurrentWidget(self.weekly_bar_chart)
+        self.stats_buttons[0].setChecked(False)
+        self.week_button.setChecked(False)
+        self.month_button.setChecked(False)
+        self.year_button.setChecked(True)
         self.pie_container.show()
         self._refresh_pie_chart()
 
     def _on_date_prev(self):
-        from datetime import timedelta
-        self.viewing_date -= timedelta(days=1)
+        if self._view_mode == 'day':
+            self.viewing_date -= timedelta(days=1)
+        elif self._view_mode == 'week':
+            self.viewing_date -= timedelta(days=7)
+        elif self._view_mode == 'month':
+            # Move to previous month
+            if self.viewing_date.month == 1:
+                self.viewing_date = self.viewing_date.replace(year=self.viewing_date.year - 1, month=12)
+            else:
+                self.viewing_date = self.viewing_date.replace(month=self.viewing_date.month - 1)
+        elif self._view_mode == 'year':
+            # Move to previous year
+            self.viewing_date = self.viewing_date.replace(year=self.viewing_date.year - 1)
         self.pie_container.show()
         self._refresh_pie_chart()
 
     def _on_date_next(self):
-        from datetime import timedelta
-        self.viewing_date += timedelta(days=1)
+        if self._view_mode == 'day':
+            self.viewing_date += timedelta(days=1)
+        elif self._view_mode == 'week':
+            self.viewing_date += timedelta(days=7)
+        elif self._view_mode == 'month':
+            # Move to next month
+            if self.viewing_date.month == 12:
+                self.viewing_date = self.viewing_date.replace(year=self.viewing_date.year + 1, month=1)
+            else:
+                self.viewing_date = self.viewing_date.replace(month=self.viewing_date.month + 1)
+        elif self._view_mode == 'year':
+            # Move to next year
+            self.viewing_date = self.viewing_date.replace(year=self.viewing_date.year + 1)
         self.pie_container.show()
         self._refresh_pie_chart()
 
@@ -624,35 +1159,79 @@ class PomodoroPanel(QtWidgets.QFrame):
         self._load_daily_statistics()
         self._update_date_display()
         self.daily_pie_chart.set_data(self.daily_allocations, self.viewing_date, self._view_mode)
+        self.weekly_bar_chart.set_data(self.weekly_allocations, self.viewing_date, self._view_mode)
+        if self._view_mode == 'week':
+            self.chart_stack.setCurrentWidget(self.weekly_bar_chart)
+        elif self._view_mode == 'month':
+            self.chart_stack.setCurrentWidget(self.weekly_bar_chart)
+        elif self._view_mode == 'year':
+            self.chart_stack.setCurrentWidget(self.weekly_bar_chart)
+        else:
+            self.chart_stack.setCurrentWidget(self.daily_pie_chart)
 
     def _update_date_display(self):
-        today = datetime.now().date()
+        current_date = datetime.now().date()
+        reference_date = self.viewing_date
         if self._view_mode == 'day':
-            if self.viewing_date == today:
-                date_text = '今日 ' + self.viewing_date.strftime('%Y年%m月%d日')
-            elif self.viewing_date == today - __import__('datetime').timedelta(days=1):
-                date_text = '昨日 ' + self.viewing_date.strftime('%Y年%m月%d日')
-            elif self.viewing_date == today + __import__('datetime').timedelta(days=1):
-                date_text = '明日 ' + self.viewing_date.strftime('%Y年%m月%d日')
+            if reference_date == current_date:
+                date_text = '今日 ' + reference_date.strftime('%Y年%m月%d日')
+            elif reference_date == current_date - __import__('datetime').timedelta(days=1):
+                date_text = '昨日 ' + reference_date.strftime('%Y年%m月%d日')
+            elif reference_date == current_date + __import__('datetime').timedelta(days=1):
+                date_text = '明日 ' + reference_date.strftime('%Y年%m月%d日')
             else:
-                date_text = self.viewing_date.strftime('%Y年%m月%d日')
+                date_text = reference_date.strftime('%Y年%m月%d日')
         elif self._view_mode == 'week':
-            date_text = f'{today.strftime("%Y")} 年 第 {today.isocalendar()[1]} 週'
+            date_text = f'{reference_date.strftime("%Y")} 年 第 {reference_date.isocalendar()[1]} 週'
         elif self._view_mode == 'month':
-            date_text = f'{today.strftime("%Y-%m")} 月'
+            date_text = f'{reference_date.strftime("%Y-%m")} 月'
         elif self._view_mode == 'year':
-            date_text = f'{today.strftime("%Y")} 年'
+            date_text = f'{reference_date.strftime("%Y")} 年'
         else:
             date_text = '統計'
         self.date_display.setText(date_text)
 
+    def _populate_category_combo(self):
+        """Populate category filter combo with all available activities from _status_options."""
+        self.category_combo.blockSignals(True)
+        self.category_combo.clear()
+        self.category_combo.addItem('綜合', None)
+        # Add activities from _status_options only
+        for activity in self._status_options:
+            if activity and activity != self._add_status_label:
+                self.category_combo.addItem(activity, activity)
+        self.category_combo.setCurrentIndex(0)
+        self.category_combo.blockSignals(False)
+
+    def _on_category_changed(self, text):
+        """Handle category selection change."""
+        selected = self.category_combo.currentData()
+        self.weekly_bar_chart.set_category_filter(selected)
+
+    def _sync_category_combo_to_activity(self, activity_text):
+        """當新增或選擇活動時，同步更新週圖表的類別下拉框"""
+        if self._view_mode == 'week' and activity_text:
+            # 在類別下拉框中找到並選擇該活動
+            self.category_combo.blockSignals(True)
+            for i in range(self.category_combo.count()):
+                if self.category_combo.itemData(i) == activity_text:
+                    self.category_combo.setCurrentIndex(i)
+                    break
+            self.category_combo.blockSignals(False)
+            # 更新週圖表顯示該類別的數據
+            self.weekly_bar_chart.set_category_filter(activity_text)
+
     def _load_daily_statistics(self):
         self.daily_allocations.clear()
+        self.weekly_allocations.clear()
         try:
             if os.path.isfile(self._session_records_file):
                 with open(self._session_records_file, 'r', encoding='utf-8') as f:
                     records = json.load(f)
                     if isinstance(records, list):
+                        reference_date = self.viewing_date if hasattr(self.viewing_date, 'isocalendar') else datetime.now().date()
+                        target_week = reference_date.isocalendar()[1]
+                        target_year = reference_date.isocalendar()[0]
                         for record in records:
                             if isinstance(record, dict):
                                 timestamp_str = record.get('timestamp', '')
@@ -667,18 +1246,13 @@ class PomodoroPanel(QtWidgets.QFrame):
                                 if self._view_mode == 'day':
                                     should_include = record_date == self.viewing_date
                                 elif self._view_mode == 'week':
-                                    today = datetime.now().date()
-                                    target_week = today.isocalendar()[1]
-                                    target_year = today.isocalendar()[0]
                                     record_week = record_date.isocalendar()[1]
                                     record_year = record_date.isocalendar()[0]
                                     should_include = (record_week == target_week and record_year == target_year)
                                 elif self._view_mode == 'month':
-                                    today = datetime.now().date()
-                                    should_include = (record_date.year == today.year and record_date.month == today.month)
+                                    should_include = (record_date.year == reference_date.year and record_date.month == reference_date.month)
                                 elif self._view_mode == 'year':
-                                    today = datetime.now().date()
-                                    should_include = record_date.year == today.year
+                                    should_include = record_date.year == reference_date.year
 
                                 if should_include:
                                     status = record.get('status', '')
@@ -686,17 +1260,14 @@ class PomodoroPanel(QtWidgets.QFrame):
                                     if status and seconds > 0:
                                         minutes = int(round(seconds / 60.0))
                                         self.daily_allocations[status] = self.daily_allocations.get(status, 0) + minutes
+                                        if self._view_mode in ('week', 'month', 'year'):
+                                            day_key = record_date.isoformat()
+                                            day_bucket = self.weekly_allocations.setdefault(day_key, {})
+                                            day_bucket[status] = day_bucket.get(status, 0) + minutes
         except Exception:
             pass
 
     def _on_session_recorded(self, status_text, seconds, mode_name):
-        status_text = self._normalize_status_text(status_text)
-        if status_text == '讀書中':
-            status_text = '讀書'
-        if status_text == '休息中':
-            status_text = '休息'
-        minutes = max(1, int(round(float(seconds) / 60.0))) if seconds > 0 else 0
-        self.record_text.setText(f'{status_text}\n{minutes} 分鐘')
         self._refresh_pie_chart()
 
     def _toggle_pomodoro(self):
@@ -704,7 +1275,6 @@ class PomodoroPanel(QtWidgets.QFrame):
         if current_value != self._last_work_minutes:
             self.controller.set_work_minutes(current_value)
             self._last_work_minutes = current_value
-            self.record_text.setText('尚未產生紀錄')
         self.controller.toggle()
 
     def _reset_pomodoro(self):
