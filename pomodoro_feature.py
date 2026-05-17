@@ -1305,7 +1305,7 @@ class PomodoroPanel(QtWidgets.QFrame):
         hints = [
             '',
             '待辦清單 尚未接上',
-            '進度追蹤 尚未接上',
+            '',
             '行事曆 尚未接上',
         ]
         self.menu_hint.setText(hints[index])

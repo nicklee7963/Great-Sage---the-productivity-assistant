@@ -4,6 +4,9 @@ import random
 import json
 from pathlib import Path
 from datetime import datetime
+import uuid
+import requests
+from io import BytesIO
 
 from PyQt5 import QtWidgets, QtCore, QtGui, QtMultimedia
 
@@ -267,6 +270,816 @@ class SageBackground(QtWidgets.QWidget):
             painter.setBrush(QtGui.QColor(180, 255, 255, particle['alpha']))
             painter.setPen(QtCore.Qt.NoPen)
             painter.drawRect(QtCore.QRectF(particle['pos'].x(), particle['pos'].y(), particle['size'], particle['size']))
+
+
+# ---- Book Card Widget ----
+class BookCard(QtWidgets.QWidget):
+    """書籍卡片：顯示封面、進度條和百分比"""
+    clicked = QtCore.pyqtSignal(str)  # 發出記錄ID信號
+    
+    def __init__(self, record_data, parent=None):
+        super().__init__(parent)
+        self.record_data = record_data
+        self.cover_pixmap = None
+        # Allow flexible sizing so grid can distribute space evenly
+        self.setMinimumSize(200, 360)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Expanding)
+        # enable mouse tracking to detect hover without pressing buttons
+        self.setMouseTracking(True)
+        self._cover_rect = QtCore.QRect()
+        
+        # 從本地文件夾加載封面
+        self._load_cover_from_local()
+    
+    def _load_cover_from_local(self):
+        """從本地文件夾加載書籍封面"""
+        title = self.record_data.get('title', '').strip()
+        
+        if not title:
+            self._create_placeholder()
+            return
+        
+        # 構建本地文件路徑
+        covers_dir = os.path.join(os.path.dirname(__file__), 'assets', 'book_covers')
+        cover_path = os.path.join(covers_dir, f'{title}.jpg')
+        
+        # 嘗試加載圖片
+        if os.path.isfile(cover_path):
+            self.cover_pixmap = QtGui.QPixmap(cover_path)
+            if not self.cover_pixmap.isNull():
+                self.update()
+                return
+        
+        # 如果文件不存在或加載失敗，使用佔位圖片
+        self._create_placeholder()
+    
+    def _create_placeholder(self):
+        """創建佔位圖片"""
+        pixmap = QtGui.QPixmap(240, 360)
+        pixmap.fill(QtGui.QColor(180, 180, 200))
+        painter = QtGui.QPainter(pixmap)
+        painter.setPen(QtGui.QColor(80, 80, 100))
+        painter.setFont(QtGui.QFont('Microsoft JhengHei', 32, QtGui.QFont.Bold))
+        painter.drawText(pixmap.rect(), QtCore.Qt.AlignCenter, '?')
+        painter.end()
+        self.cover_pixmap = pixmap
+    
+    def mousePressEvent(self, event):
+        self.clicked.emit(self.record_data.get('id', ''))
+        super().mousePressEvent(event)
+    
+    def paintEvent(self, event):
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        
+        # 繪製卡片背景（不顯示外框線）
+        painter.setPen(QtCore.Qt.NoPen)
+        painter.setBrush(QtGui.QColor(10, 30, 50))
+        painter.drawRect(0, 0, self.width(), self.height())
+        
+        # 繪製封面
+        cover_width = self.width() - 10
+        cover_height = int(cover_width * 1.5)  # 保持 2:3 比例
+        
+        if self.cover_pixmap:
+            scaled = self.cover_pixmap.scaledToWidth(cover_width, QtCore.Qt.SmoothTransformation)
+            # 居中繪製
+            x = (self.width() - scaled.width()) // 2
+            y = 5
+            painter.drawPixmap(x, y, scaled)
+            cover_bottom = y + scaled.height()
+            # 保存封面區域以供 hover 顯示資訊
+            try:
+                self._cover_rect = QtCore.QRect(x, y, scaled.width(), scaled.height())
+            except Exception:
+                self._cover_rect = QtCore.QRect()
+        else:
+            cover_bottom = cover_height + 5
+            self._cover_rect = QtCore.QRect(5, 5, cover_width, cover_height)
+        
+        # 繪製進度條背景
+        progress_y = cover_bottom + 8
+        progress_rect = QtCore.QRect(5, progress_y, self.width() - 10, 6)
+        painter.fillRect(progress_rect, QtGui.QColor(40, 40, 60))
+        painter.setPen(QtGui.QPen(QtGui.QColor(100, 150, 180), 2))
+        painter.drawRect(progress_rect)
+        
+        # 計算進度
+        total = self.record_data.get('total_pages', 1)
+        current = self.record_data.get('current_page', 0)
+        progress = min(100, int(current / max(1, total) * 100))
+        
+        # 繪製進度條填充
+        filled_width = int((self.width() - 10) * progress / 100)
+        filled_rect = QtCore.QRect(5, progress_y, filled_width, 6)
+        painter.fillRect(filled_rect, QtGui.QColor(100, 255, 150))
+        
+        # 不顯示百分比文字，只顯示進度條
+        # 繪製書名（固定最多 3 行，超出在第三行末尾顯示 ...）
+        title = self.record_data.get('title', '')
+
+        title_font = QtGui.QFont('Microsoft JhengHei', 6)
+        painter.setFont(title_font)
+        painter.setPen(QtGui.QColor(200, 220, 240))
+
+        fm = QtGui.QFontMetrics(title_font)
+        text_x = 6
+        text_width = max(10, self.width() - 12)
+        line_height = fm.height()
+        max_lines = 3
+
+        # 優先在單詞邊界換行（若單詞過長則退回到字元分割），並限制為最多三行
+        lines = []
+        cur = ''
+        overflowed = False
+        words = title.split()
+        for word in words:
+            # 構建嘗試放入當前行的候選字串
+            candidate = word if not cur else (cur + ' ' + word)
+            if fm.horizontalAdvance(candidate) <= text_width:
+                cur = candidate
+                continue
+
+            # 候選不合，若單詞本身可以放進一行，則換行把 cur 推入 lines
+            if fm.horizontalAdvance(word) <= text_width:
+                if cur:
+                    lines.append(cur)
+                    cur = word
+                else:
+                    # cur 為空但 candidate 仍不合（理論上不會發生），直接放 word
+                    cur = word
+                if len(lines) >= max_lines:
+                    overflowed = True
+                    break
+                continue
+
+            # 單詞本身也太長，需用字元分割（先將 cur 推入 lines）
+            if cur:
+                lines.append(cur)
+                cur = ''
+                if len(lines) >= max_lines:
+                    overflowed = True
+                    break
+
+            part = ''
+            for ch in word:
+                if fm.horizontalAdvance(part + ch) <= text_width:
+                    part += ch
+                else:
+                    lines.append(part)
+                    part = ch
+                    if len(lines) >= max_lines:
+                        overflowed = True
+                        break
+            if overflowed:
+                break
+            if part:
+                cur = part
+
+        if cur and len(lines) < max_lines:
+            lines.append(cur)
+
+        # 只有在實際溢位（需要超過三行）時，才在最後顯示行加上省略號
+        if overflowed:
+            last = lines[max_lines - 1] if len(lines) >= max_lines else (lines[-1] if lines else '')
+            while fm.horizontalAdvance(last + '...') > text_width and last:
+                last = last[:-1]
+            if len(lines) >= max_lines:
+                lines = lines[:max_lines]
+                lines[-1] = last + '...'
+            else:
+                # 少於三行但標記為 overflow（保險處理）
+                if lines:
+                    lines[-1] = last + '...'
+
+        # 繪製書名字行（向上微調以配合較短的進度條）
+        text_y = progress_y + 12
+        for i, ln in enumerate(lines[:max_lines]):
+            painter.drawText(text_x, text_y + i * line_height, text_width, line_height,
+                             QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, ln)
+
+        # 不顯示作者資訊（根據使用者要求）
+    def mouseMoveEvent(self, event):
+        # 顯示當前是否停留於封面上，若是則顯示已讀/總頁數與百分比
+        pos = event.pos()
+        if hasattr(self, '_cover_rect') and self._cover_rect.contains(pos):
+            total = self.record_data.get('total_pages', 1)
+            current = self.record_data.get('current_page', 0)
+            pct = 0 if total <= 0 else int(current / max(1, total) * 100)
+            title = self.record_data.get('title', '').strip()
+            author = self.record_data.get('author', '').strip()
+            parts = []
+            if title:
+                parts.append(title)
+            if author:
+                parts.append(f'作者: {author}')
+            parts.append(f'已讀: {current} / {total} ({pct}%)')
+            tip = '\n'.join(parts)
+            QtWidgets.QToolTip.showText(self.mapToGlobal(pos), tip, self)
+        else:
+            QtWidgets.QToolTip.hideText()
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event):
+        QtWidgets.QToolTip.hideText()
+        super().leaveEvent(event)
+
+
+# ---- Bookshelf Panel (左邊視窗，按類別分組顯示書籍卡片) ----
+class BookshelfPanel(QtWidgets.QWidget):
+    """書架面板：按類別分組顯示書籍，每行4本"""
+    def __init__(self, parent=None, compact_mode=False):
+        super().__init__(parent)
+        self.compact_mode = compact_mode
+        self._data_file = os.path.join(os.path.dirname(__file__), 'progress_records.json')
+        self._categories_file = os.path.join(os.path.dirname(__file__), 'book_categories.json')
+        self.records = []
+        self.categories = []
+        
+        main_layout = QtWidgets.QVBoxLayout(self)
+        main_layout.setContentsMargins(12, 12, 12, 12)
+        main_layout.setSpacing(8)
+        
+        # 標題
+        title = QtWidgets.QLabel('我的書櫃')
+        title.setAlignment(QtCore.Qt.AlignLeft)
+        title.setStyleSheet('color: #dffcff; font-size: 16pt; font-weight: bold;')
+        main_layout.addWidget(title)
+        
+        # 可滾動的書架區域
+        scroll_area = QtWidgets.QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        
+        self.shelf_widget = QtWidgets.QWidget()
+        self.shelf_layout = QtWidgets.QVBoxLayout(self.shelf_widget)
+        self.shelf_layout.setContentsMargins(0, 0, 0, 0)
+        self.shelf_layout.setSpacing(12)
+        
+        scroll_area.setWidget(self.shelf_widget)
+        main_layout.addWidget(scroll_area, stretch=1)
+        
+        self.load_data()
+        self.refresh_bookshelf()
+    
+    def load_data(self):
+        """加載書籍和分類數據"""
+        try:
+            if os.path.isfile(self._data_file):
+                with open(self._data_file, 'r', encoding='utf-8') as f:
+                    self.records = json.load(f)
+            else:
+                self.records = []
+        except Exception:
+            self.records = []
+        
+        try:
+            if os.path.isfile(self._categories_file):
+                with open(self._categories_file, 'r', encoding='utf-8') as f:
+                    self.categories = json.load(f)
+            else:
+                self.categories = []
+        except Exception:
+            self.categories = []
+    
+    def refresh_bookshelf(self):
+        """刷新書架顯示，按類別分組（每行4本）"""
+        # 清空現有布局
+        while self.shelf_layout.count() > 0:
+            item = self.shelf_layout.takeAt(0)
+            if item and item.widget():
+                item.widget().deleteLater()
+        
+        # 分組書籍
+        books_by_category = {}
+        for rec in self.records:
+            cat = rec.get('category', '（未分類）')
+            if cat not in books_by_category:
+                books_by_category[cat] = []
+            books_by_category[cat].append(rec)
+        
+        # 按字典順序顯示分類
+        sorted_categories = sorted(books_by_category.keys())
+        
+        for category in sorted_categories:
+            # 添加分類標題
+            cat_label = QtWidgets.QLabel(category)
+            cat_label.setStyleSheet('color: #7fdcff; font-size: 12pt; font-weight: bold; margin-top: 8px;')
+            self.shelf_layout.addWidget(cat_label)
+            
+            # 按字母順序排列書籍
+            books_in_cat = books_by_category[category]
+            sorted_books = sorted(books_in_cat, key=lambda r: r.get('title', '').lower())
+            
+            # 使用 QGridLayout 實現 4 列布局
+            grid_widget = QtWidgets.QWidget()
+            grid_layout = QtWidgets.QGridLayout(grid_widget)
+            grid_layout.setContentsMargins(0, 0, 0, 0)
+            grid_layout.setSpacing(20)
+            # 為了讓書籍平均分配在整個視窗，為每一列設定相等的伸縮係數
+            for c in range(4):
+                grid_layout.setColumnStretch(c, 1)
+            
+            for idx, rec in enumerate(sorted_books):
+                row = idx // 4
+                col = idx % 4
+                card = BookCard(rec, self)
+                # 將卡片置中於欄位並靠上排列
+                grid_layout.addWidget(card, row, col, alignment=QtCore.Qt.AlignHCenter | QtCore.Qt.AlignTop)
+            
+            self.shelf_layout.addWidget(grid_widget)
+        
+        # 添加底部伸縮
+        self.shelf_layout.addStretch()
+
+
+# ---- Progress Tracker Panel ----
+class ProgressTrackerPanel(QtWidgets.QWidget):
+    """進度追蹤面板：上方編輯表單 + 下方記錄清單，儲存在 progress_records.json（書籍追蹤）"""
+    show_bookshelf_requested = QtCore.pyqtSignal()  # 請求顯示書架的信號
+    
+    def __init__(self, parent=None, compact_mode=False):
+        super().__init__(parent)
+        self.compact_mode = compact_mode
+        self._data_file = os.path.join(os.path.dirname(__file__), 'progress_records.json')
+        self._categories_file = os.path.join(os.path.dirname(__file__), 'book_categories.json')
+        self.records = []  # list of dicts
+        self.categories = []  # list of category strings
+        self._selected_record_id = None  # 追蹤當前選中的記錄ID
+        self._current_page = 0  # 當前頁碼（0-indexed）
+        self._items_per_page = 10  # 每頁顯示數量
+        self.main_window = None  # 對左窗口的引用，用於更新封面
+
+        main_layout = QtWidgets.QVBoxLayout(self)
+        main_layout.setContentsMargins(8, 8, 8, 8)
+        main_layout.setSpacing(8)
+
+        # Top: form (編輯區)
+        form = QtWidgets.QWidget()
+        form_layout = QtWidgets.QFormLayout(form)
+        form_layout.setLabelAlignment(QtCore.Qt.AlignRight)
+
+        self.title_edit = QtWidgets.QLineEdit()
+        self.author_edit = QtWidgets.QLineEdit()
+        self.total_spin = QtWidgets.QSpinBox()
+        self.total_spin.setRange(1, 100000)
+        self.current_spin = QtWidgets.QSpinBox()
+        self.current_spin.setRange(0, 100000)
+
+        # 為書名添加自動完成功能
+        self.title_completer = QtWidgets.QCompleter([])
+        self.title_completer.setCaseSensitivity(QtCore.Qt.CaseInsensitive)
+        self.title_completer.setCompletionMode(QtWidgets.QCompleter.PopupCompletion)
+        self.title_edit.setCompleter(self.title_completer)
+
+        form_layout.addRow('書名：', self.title_edit)
+        form_layout.addRow('作者：', self.author_edit)
+        form_layout.addRow('總頁數：', self.total_spin)
+        form_layout.addRow('已讀頁數：', self.current_spin)
+        
+        # 分類選擇區
+        category_layout = QtWidgets.QHBoxLayout()
+        self.category_combo = QtWidgets.QComboBox()
+        self.category_combo.addItem('（未分類）')  # 預設選項
+        self.add_category_btn = QtWidgets.QPushButton('+')
+        self.add_category_btn.setMaximumWidth(40)
+        self.add_category_btn.clicked.connect(self._on_add_category)
+        category_layout.addWidget(self.category_combo)
+        category_layout.addWidget(self.add_category_btn)
+        form_layout.addRow('分類：', category_layout)
+
+        btn_row = QtWidgets.QHBoxLayout()
+        self.add_btn = QtWidgets.QPushButton('新增')
+        self.update_btn = QtWidgets.QPushButton('更新')
+        self.remove_btn = QtWidgets.QPushButton('移除')
+        self.update_btn.hide()  # 初始時隱藏「更新」按鈕
+        btn_row.addWidget(self.add_btn)
+        btn_row.addWidget(self.update_btn)
+        btn_row.addWidget(self.remove_btn)
+        form_layout.addRow(btn_row)
+
+        # 在表單上安裝事件過濾器以處理背景點擊
+        form.installEventFilter(self)
+        main_layout.addWidget(form, stretch=0)
+
+        # Bottom: list (已紀錄書目)
+        list_container = QtWidgets.QWidget()
+        list_layout = QtWidgets.QVBoxLayout(list_container)
+        list_layout.setContentsMargins(0, 0, 0, 0)
+        list_layout.setSpacing(6)
+        header = QtWidgets.QLabel('閱讀紀錄（選擇以編輯）')
+        header.setAlignment(QtCore.Qt.AlignLeft)
+        list_layout.addWidget(header)
+        self.list_widget = QtWidgets.QListWidget()
+        list_layout.addWidget(self.list_widget)
+        
+        # 分頁控件
+        pagination_widget = QtWidgets.QWidget()
+        pagination_layout = QtWidgets.QHBoxLayout(pagination_widget)
+        pagination_layout.setContentsMargins(0, 0, 0, 0)
+        pagination_layout.setSpacing(6)
+        
+        self.prev_btn = QtWidgets.QPushButton('← 上一頁')
+        self.prev_btn.setMaximumWidth(80)
+        self.page_label = QtWidgets.QLabel('第 1 頁')
+        self.page_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.next_btn = QtWidgets.QPushButton('下一頁 →')
+        self.next_btn.setMaximumWidth(80)
+        
+        pagination_layout.addWidget(self.prev_btn)
+        pagination_layout.addStretch()
+        pagination_layout.addWidget(self.page_label)
+        pagination_layout.addStretch()
+        pagination_layout.addWidget(self.next_btn)
+        
+        list_layout.addWidget(pagination_widget)
+        main_layout.addWidget(list_container, stretch=1)
+
+        # signal connections
+        self.add_btn.clicked.connect(self._on_add)
+        self.update_btn.clicked.connect(self._on_update)
+        self.remove_btn.clicked.connect(self._on_remove)
+        self.list_widget.currentItemChanged.connect(self._on_select_item)
+        self.prev_btn.clicked.connect(self._on_prev_page)
+        self.next_btn.clicked.connect(self._on_next_page)
+        
+        # 在表單上安裝事件過濾器以處理背景點擊
+        form.installEventFilter(self)
+        # 在列表上安裝事件過濾器以處理背景點擊
+        self.list_widget.installEventFilter(self)
+
+        self.load_categories()
+        self.load_records()
+        self._update_title_completer()  # 初始化自動完成列表
+        self.refresh_list()
+        self._update_button_state()  # 初始化按鈕狀態
+
+    def load_records(self):
+        try:
+            if os.path.isfile(self._data_file):
+                with open(self._data_file, 'r', encoding='utf-8') as f:
+                    loaded = json.load(f)
+                if isinstance(loaded, list):
+                    self.records = loaded
+                else:
+                    self.records = []
+            else:
+                self.records = []
+        except Exception:
+            self.records = []
+
+    def save_records(self):
+        try:
+            with open(self._data_file, 'w', encoding='utf-8') as f:
+                json.dump(self.records, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def load_categories(self):
+        """加載書籍分類"""
+        try:
+            if os.path.isfile(self._categories_file):
+                with open(self._categories_file, 'r', encoding='utf-8') as f:
+                    self.categories = json.load(f)
+            else:
+                self.categories = []
+        except Exception:
+            self.categories = []
+        self._refresh_category_combo()
+
+    def save_categories(self):
+        """保存書籍分類"""
+        try:
+            with open(self._categories_file, 'w', encoding='utf-8') as f:
+                json.dump(self.categories, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _update_title_completer(self):
+        """更新書名自動完成列表（根據 book_covers 文件夾中的文件）"""
+        title_list = []
+        
+        # 從 book_covers 文件夾讀取所有 .jpg 文件
+        covers_dir = os.path.join(os.path.dirname(__file__), 'assets', 'book_covers')
+        if os.path.isdir(covers_dir):
+            try:
+                for filename in os.listdir(covers_dir):
+                    if filename.endswith('.jpg') or filename.endswith('.jpeg'):
+                        # 移除副檔名，獲得書名
+                        title = filename.rsplit('.', 1)[0]
+                        if title.strip():
+                            title_list.append(title)
+            except Exception:
+                pass
+        
+        # 排序：中文先，英文後
+        title_list = sorted(set(title_list), key=lambda t: self._sort_key(t))
+        # 創建模型並設置給 completer
+        model = QtCore.QStringListModel(title_list, self.title_completer)
+        self.title_completer.setModel(model)
+
+    def _refresh_category_combo(self):
+        """刷新分類下拉選單"""
+        current_text = self.category_combo.currentText()
+        self.category_combo.blockSignals(True)
+        self.category_combo.clear()
+        self.category_combo.addItem('（未分類）')
+        for cat in sorted(self.categories):
+            self.category_combo.addItem(cat)
+        # 恢復之前的選擇
+        idx = self.category_combo.findText(current_text)
+        if idx >= 0:
+            self.category_combo.setCurrentIndex(idx)
+        else:
+            self.category_combo.setCurrentIndex(0)
+        self.category_combo.blockSignals(False)
+
+    def _on_add_category(self):
+        """新增分類"""
+        text, ok = QtWidgets.QInputDialog.getText(self, '新增分類', '請輸入新分類名稱：')
+        if ok and text.strip():
+            cat = text.strip()
+            if cat not in self.categories:
+                self.categories.append(cat)
+                self.save_categories()
+                self._refresh_category_combo()
+                # 自動選擇新增的分類
+                idx = self.category_combo.findText(cat)
+                if idx >= 0:
+                    self.category_combo.setCurrentIndex(idx)
+
+    def _is_chinese(self, text):
+        """檢查文本是否以中文字符開頭"""
+        if not text:
+            return False
+        first_char = text[0]
+        return '\u4e00' <= first_char <= '\u9fff'
+    
+    def _sort_key(self, title):
+        """排序鍵：中文先（0），英文後（1）；然後按字母序排列"""
+        is_chinese = self._is_chinese(title)
+        return (0 if is_chinese else 1, title.lower())
+
+    def refresh_list(self):
+        # 暫停信號以避免在清除列表時觸發 currentItemChanged
+        self.list_widget.blockSignals(True)
+        self.list_widget.clear()
+        self.list_widget.blockSignals(False)
+        
+        # 按排序規則排序（中文先，然後按字母序）
+        sorted_records = sorted(self.records, key=lambda r: self._sort_key(r.get('title', '')))
+        
+        # 計算總頁數
+        total_records = len(sorted_records)
+        total_pages = (total_records + self._items_per_page - 1) // self._items_per_page
+        if total_pages == 0:
+            total_pages = 1
+        
+        # 確保當前頁碼有效
+        if self._current_page >= total_pages:
+            self._current_page = total_pages - 1
+        if self._current_page < 0:
+            self._current_page = 0
+        
+        # 計算本頁顯示的記錄範圍
+        start_idx = self._current_page * self._items_per_page
+        end_idx = start_idx + self._items_per_page
+        page_records = sorted_records[start_idx:end_idx]
+        
+        # 顯示本頁的記錄
+        for rec in page_records:
+            title = (rec.get('title', '') or '').strip()
+            # 只顯示書名（若無書名則顯示未命名）
+            display = title if title else '（未命名）'
+            item = QtWidgets.QListWidgetItem(display)
+            item.setData(QtCore.Qt.UserRole, rec.get('id'))
+            self.list_widget.addItem(item)
+        
+        # 更新分頁標籤和按鈕狀態
+        self.page_label.setText(f'第 {self._current_page + 1} 頁 / 共 {total_pages} 頁')
+        self.prev_btn.setEnabled(self._current_page > 0)
+        self.next_btn.setEnabled(self._current_page < total_pages - 1)
+
+    def _find_record_by_id(self, idv):
+        for r in self.records:
+            if r.get('id') == idv:
+                return r
+        return None
+
+    def _clear_form(self):
+        """清空編輯表單"""
+        self.title_edit.clear()
+        self.author_edit.clear()
+        self.total_spin.setValue(1)
+        self.current_spin.setValue(0)
+        self.category_combo.setCurrentIndex(0)  # 重置為「未分類」
+        self._selected_record_id = None
+        # 確保清除列表選擇狀態，避免 currentItemChanged 信號不被觸發
+        self.list_widget.blockSignals(True)
+        self.list_widget.clearSelection()
+        self.list_widget.setCurrentItem(None)
+        self.list_widget.blockSignals(False)
+        self._update_button_state()
+
+    def _update_button_state(self):
+        """根據選擇狀態更新按鈕顯示"""
+        if self._selected_record_id is None:
+            # 未選中：顯示「新增」，隱藏「更新」和「移除」
+            self.add_btn.show()
+            self.update_btn.hide()
+            self.remove_btn.hide()
+        else:
+            # 已選中：隱藏「新增」，顯示「更新」和「移除」
+            self.add_btn.hide()
+            self.update_btn.show()
+            self.remove_btn.show()
+
+    def eventFilter(self, obj, event):
+        """處理背景點擊事件（整個面板的空白區域）"""
+        if event.type() == QtCore.QEvent.MouseButtonPress:
+            # 如果點擊在列表上
+            if obj == self.list_widget:
+                item = self.list_widget.itemAt(event.pos())
+                if item is None:
+                    # 點擊在列表背景上，清空選擇和表單
+                    self._clear_form()
+                    return True
+                return False
+            
+            # 定義表單中的互動元素
+            form_widgets = [self.title_edit, self.author_edit, self.total_spin, 
+                          self.current_spin, self.category_combo, self.add_category_btn,
+                          self.add_btn, self.update_btn, self.remove_btn]
+            
+            # 檢查點擊位置是否在表單控件上
+            def is_in_form_area(pos, widget_list):
+                """檢查位置是否在任何表單控件的幾何範圍內"""
+                for w in widget_list:
+                    if w and w.isVisible() and w.geometry().contains(w.mapFromGlobal(widget_list[0].mapToGlobal(pos))):
+                        return True
+                return False
+            
+            # 簡化：檢查全局位置
+            global_pos = self.mapToGlobal(event.pos())
+            is_on_control = False
+            for w in form_widgets:
+                if w and w.isVisible():
+                    local_pos = w.mapFromGlobal(global_pos)
+                    if w.rect().contains(local_pos):
+                        is_on_control = True
+                        break
+            
+            # 如果點擊不在任何表單控件上，清空表單
+            if not is_on_control:
+                self._clear_form()
+                return True
+        
+        return super().eventFilter(obj, event)
+
+    def _on_select_item(self, current, previous=None):
+        try:
+            if current is None:
+                self._clear_form()
+                return
+            idv = current.data(QtCore.Qt.UserRole)
+            rec = self._find_record_by_id(idv)
+            if not rec:
+                self._clear_form()
+                return
+            self._selected_record_id = idv  # 保存選中的記錄ID
+            self.title_edit.setText(rec.get('title', ''))
+            self.author_edit.setText(rec.get('author', ''))
+            total = int(rec.get('total_pages', 0) or 0)
+            cur = int(rec.get('current_page', 0) or 0)
+            self.total_spin.setValue(max(1, total))
+            self.current_spin.setValue(max(0, cur))
+            # 加載分類
+            category = rec.get('category', '（未分類）')
+            idx = self.category_combo.findText(category)
+            if idx >= 0:
+                self.category_combo.setCurrentIndex(idx)
+            else:
+                self.category_combo.setCurrentIndex(0)
+            self._update_button_state()  # 更新按鈕狀態為「更新」模式
+            # 發出信號要求顯示書架
+            self.show_bookshelf_requested.emit()
+        except Exception:
+            pass
+
+    def _on_add(self):
+        title = self.title_edit.text().strip()
+        author = self.author_edit.text().strip()
+        total = int(self.total_spin.value())
+        cur = int(self.current_spin.value())
+        category = self.category_combo.currentText()
+        if category == '（未分類）':
+            category = '（未分類）'
+        if not title:
+            return
+        
+        # 檢查是否已存在同書名的紀錄，如果存在則更新而非新增
+        existing_rec = None
+        for r in self.records:
+            if r.get('title') == title:
+                existing_rec = r
+                break
+        
+        if existing_rec:
+            # 更新現有紀錄
+            existing_rec.update({
+                'author': author,
+                'total_pages': total,
+                'current_page': cur,
+                'category': category,
+            })
+        else:
+            # 新增紀錄
+            rec = {
+                'id': str(uuid.uuid4()),
+                'title': title,
+                'author': author,
+                'total_pages': total,
+                'current_page': cur,
+                'category': category,
+            }
+            self.records.append(rec)
+        
+        self.save_records()
+        self._current_page = 0  # 新增時重置到第一頁
+        self._update_title_completer()  # 更新自動完成列表
+        self.refresh_list()
+        self._clear_form()  # 新增完成後清空表單
+        # 刷新書架封面
+        try:
+            if self.main_window:
+                self.show_bookshelf_requested.emit()
+        except Exception:
+            pass
+
+    def _on_update(self):
+        if self._selected_record_id is None:
+            return
+        rec = self._find_record_by_id(self._selected_record_id)
+        if not rec:
+            return
+        title = self.title_edit.text().strip()
+        author = self.author_edit.text().strip()
+        total = int(self.total_spin.value())
+        cur = int(self.current_spin.value())
+        category = self.category_combo.currentText()
+        if category == '（未分類）':
+            category = '（未分類）'
+        rec.update({
+            'title': title,
+            'author': author,
+            'total_pages': total,
+            'current_page': cur,
+            'category': category,
+        })
+        self.save_records()
+        self._update_title_completer()  # 更新自動完成列表
+        self.refresh_list()
+        self._clear_form()  # 更新完成後清空表單
+        # 刷新書架封面
+        try:
+            if self.main_window:
+                self.show_bookshelf_requested.emit()
+        except Exception:
+            pass
+
+    def _on_remove(self):
+        if self._selected_record_id is None:
+            return
+        self.records = [r for r in self.records if r.get('id') != self._selected_record_id]
+        self.save_records()
+        self._current_page = 0  # 刪除時重置到第一頁
+        self._update_title_completer()  # 更新自動完成列表
+        self.refresh_list()
+        self._clear_form()  # 移除完成後清空表單
+        # 刷新書架封面
+        try:
+            if self.main_window:
+                self.show_bookshelf_requested.emit()
+        except Exception:
+            pass
+
+    def _on_prev_page(self):
+        """上一頁"""
+        if self._current_page > 0:
+            self._current_page -= 1
+            self._clear_form()  # 切換頁面時清空表單
+            self.refresh_list()
+
+    def _on_next_page(self):
+        """下一頁"""
+        total_records = len(self.records)
+        total_pages = (total_records + self._items_per_page - 1) // self._items_per_page
+        if total_pages == 0:
+            total_pages = 1
+        if self._current_page < total_pages - 1:
+            self._current_page += 1
+            self._clear_form()  # 切換頁面時清空表單
+            self.refresh_list()
 
 
 # ---- Notice UI integrated from notice.py ----
@@ -685,9 +1498,30 @@ class FinalSageWindow(QtWidgets.QMainWindow):
         overlay_layout.setContentsMargins(0, 0, 0, 0)
         overlay_layout.addStretch(1)
 
+        # 內容堆疊窗口（圓盤 vs 書架）
+        self.display_stack = QtWidgets.QStackedWidget()
+        
+        # 圓盤視圖
+        disc_container = QtWidgets.QWidget()
+        disc_layout = QtWidgets.QVBoxLayout(disc_container)
+        disc_layout.setContentsMargins(0, 0, 0, 0)
+        disc_layout.addStretch(1)
+        
         self.disc = GreatSageDisc(compact_mode=compact_mode)
         self.disc.setFixedSize(700 if compact_mode else 760, 700 if compact_mode else 760)
-        overlay_layout.addWidget(self.disc, alignment=QtCore.Qt.AlignCenter)
+        disc_layout.addWidget(self.disc, alignment=QtCore.Qt.AlignCenter)
+        disc_layout.addStretch(1)
+        
+        self.display_stack.addWidget(disc_container)
+        
+        # 書架視圖
+        self.bookshelf_panel = BookshelfPanel(compact_mode=compact_mode)
+        self.display_stack.addWidget(self.bookshelf_panel)
+        
+        # 默認顯示圓盤（索引 0）
+        self.display_stack.setCurrentIndex(0)
+        
+        overlay_layout.addWidget(self.display_stack, stretch=1)
         overlay_layout.addStretch(1)
 
         self.calendar_summary_widget = QtWidgets.QFrame(root)
@@ -815,6 +1649,16 @@ class FinalSageWindow(QtWidgets.QMainWindow):
             self.calendar_items_layout.addStretch(1)
         except Exception:
             pass
+
+    def show_bookshelf(self):
+        """顯示書架視圖"""
+        self.display_stack.setCurrentIndex(1)  # 顯示書架
+        self.bookshelf_panel.load_data()
+        self.bookshelf_panel.refresh_bookshelf()
+
+    def show_disc(self):
+        """顯示圓盤視圖"""
+        self.display_stack.setCurrentIndex(0)  # 顯示圓盤
 
     def _enter_notice_mode(self):
         try:
@@ -958,11 +1802,20 @@ class MenuSageWindow(QtWidgets.QMainWindow):
         self.pomodoro_editor = PomodoroPanel(self.controller, compact_mode=self.compact_mode)
         self.editor_stack.addWidget(self.pomodoro_editor)
         self.editor_stack.addWidget(self._build_placeholder('待辦清單 尚未接上'))
-        self.editor_stack.addWidget(self._build_placeholder('進度追蹤 尚未接上'))
+        self.progress_panel = ProgressTrackerPanel(compact_mode=self.compact_mode)
+        self.progress_panel.main_window = self.main_window  # 設置左窗口引用
+        self.editor_stack.addWidget(self.progress_panel)
         self.calendar_panel = CalendarPanel(compact_mode=self.compact_mode)
         self.editor_stack.addWidget(self.calendar_panel)
         menu_layout.addWidget(self.editor_stack)
         menu_layout.addStretch(1)
+
+        # 連接進度追蹤面板的信號到左窗口的書架顯示
+        if self.main_window:
+            try:
+                self.progress_panel.show_bookshelf_requested.connect(self.main_window.show_bookshelf)
+            except Exception:
+                pass
 
         try:
             self.calendar_panel.dateOpened.connect(self._enter_calendar_detail)
@@ -1015,10 +1868,26 @@ class MenuSageWindow(QtWidgets.QMainWindow):
         hints = [
             '',
             '待辦清單 尚未接上',
-            '進度追蹤 尚未接上',
+            '',
             '行事曆',
         ]
         self.menu_hint.setText(hints[index])
+        
+        # 根據選擇的功能切換左窗口的顯示（進度追蹤顯示書架，其他顯示圓盤）
+        if self.main_window is not None:
+            if index == 2:
+                # 進度追蹤：顯示書架
+                try:
+                    self.main_window.show_bookshelf()
+                except Exception:
+                    pass
+            else:
+                # 其他功能：顯示圓盤
+                try:
+                    self.main_window.show_disc()
+                except Exception:
+                    pass
+        
         if index == 3:
             try:
                 self.calendar_panel.show_month_view(emit_signal=False)
