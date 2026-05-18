@@ -12,6 +12,7 @@ from PyQt5 import QtWidgets, QtCore, QtGui, QtMultimedia
 
 from pomodoro_feature import PomodoroController, PomodoroPanel
 from calendar_feature import CalendarPanel
+from todo_feature import TodoListPanel
 
 
 def _configure_qt_plugin_paths():
@@ -1470,6 +1471,96 @@ class PomodoroController(QtCore.QObject):
         self._emit()
 
 
+class TodoItemCard(QtWidgets.QWidget):
+    """任務卡片 widget - 支持點擊循環狀態切換、hover 顯示常規任務信息"""
+    def __init__(self, task, status_colors, todo_panel, main_window, parent=None):
+        super().__init__(parent)
+        self.task = task
+        self.status_colors = status_colors
+        self.todo_panel = todo_panel
+        self.main_window = main_window
+        self.status_dot_label = None
+        self.activity_timer = None  # 3秒定時器
+        
+        # 狀態循環順序：completed -> in_progress -> pending -> completed
+        self.status_cycle = ['completed', 'in_progress', 'pending']
+        
+        # 主容器
+        main_item_layout = QtWidgets.QHBoxLayout(self)
+        main_item_layout.setContentsMargins(12, 12, 12, 12)
+        main_item_layout.setSpacing(8)
+
+        status = task.get('status', 'pending')
+        status_color = status_colors.get(status, QtGui.QColor(255, 255, 255))
+
+        self.status_dot_label = QtWidgets.QLabel('●')
+        self.status_dot_label.setStyleSheet(f'color: rgb({status_color.red()}, {status_color.green()}, {status_color.blue()}); font-size: 36px;')
+        self.status_dot_label.setFixedWidth(32)
+        self.status_dot_label.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        main_item_layout.addWidget(self.status_dot_label)
+
+        name_label = QtWidgets.QLabel(task.get('name', 'Untitled'))
+        name_label.setStyleSheet('color: #e6fbff; font-size: 28px; font-weight: 600;')
+        name_label.setFont(QtGui.QFont('Microsoft JhengHei', 28, QtGui.QFont.Bold))
+        name_label.setWordWrap(True)
+        name_label.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+        main_item_layout.addWidget(name_label, 1)
+        main_item_layout.addStretch(1)
+
+        self.setStyleSheet('''
+            QWidget {
+                background: rgba(14, 28, 50, 180);
+                border: none;
+                border-radius: 4px;
+            }
+            QWidget:hover {
+                background: rgba(33, 62, 95, 200);
+                border: none;
+            }
+        ''')
+        
+        # 為常規任務設置 tooltip 顯示星期信息
+        if task.get('type') == 'routine':
+            routine_days = task.get('routine_days', [])
+            weekday_names = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']
+            routine_text = '、'.join([weekday_names[day] for day in sorted(routine_days) if day < 7])
+            self.setToolTip(routine_text)
+    
+    def mousePressEvent(self, event):
+        """點擊任務卡片 - 循環切換狀態"""
+        # 獲取當前狀態在循環列表中的位置
+        current_status = self.task.get('status', 'pending')
+        current_index = self.status_cycle.index(current_status) if current_status in self.status_cycle else 2
+        # 循環到下一個狀態
+        next_index = (current_index + 1) % len(self.status_cycle)
+        next_status = self.status_cycle[next_index]
+        
+        # 更新任務狀態
+        self.task['status'] = next_status
+        self.todo_panel._save_tasks()
+        
+        # 更新卡片顯示
+        status_color = self.status_colors.get(next_status, QtGui.QColor(255, 255, 255))
+        self.status_dot_label.setStyleSheet(f'color: rgb({status_color.red()}, {status_color.green()}, {status_color.blue()}); font-size: 36px;')
+        
+        # 取消舊的定時器
+        if self.activity_timer:
+            self.activity_timer.stop()
+        
+        # 設置3秒定時器，3秒後重新排列
+        self.activity_timer = QtCore.QTimer()
+        self.activity_timer.setSingleShot(True)
+        self.activity_timer.timeout.connect(self._on_timer_timeout)
+        self.activity_timer.start(3000)  # 3000 毫秒 = 3 秒
+        
+        super().mousePressEvent(event)
+    
+    def _on_timer_timeout(self):
+        """3秒定時器超時 - 重新排列任務"""
+        if self.main_window:
+            self.todo_panel.refresh_display()
+
+
 class FinalSageWindow(QtWidgets.QMainWindow):
     toggleRequested = QtCore.pyqtSignal()
     def __init__(self, controller=None, compact_mode=False):
@@ -1517,6 +1608,52 @@ class FinalSageWindow(QtWidgets.QMainWindow):
         # 書架視圖
         self.bookshelf_panel = BookshelfPanel(compact_mode=compact_mode)
         self.display_stack.addWidget(self.bookshelf_panel)
+        
+        # 待辦清單視圖
+        self.todo_list_display = QtWidgets.QWidget()
+        todo_list_layout = QtWidgets.QVBoxLayout(self.todo_list_display)
+        todo_list_layout.setContentsMargins(12, 12, 12, 12)
+        todo_list_layout.setSpacing(8)
+        
+        # 待辦清單標題（隱藏）
+        todo_title = QtWidgets.QLabel('待辦清單')
+        todo_title.setStyleSheet('color: #e6fbff; font-weight: bold; font-size: 18px;')
+        todo_title.hide()
+        todo_list_layout.addWidget(todo_title)
+        
+        # 待辦清單內容（可滾動）
+        self.todo_list_scroll = QtWidgets.QScrollArea()
+        self.todo_list_scroll.setWidgetResizable(True)
+        self.todo_list_scroll.setStyleSheet('''
+            QScrollArea {
+                background: transparent;
+                border: none;
+            }
+            QScrollBar:vertical {
+                background: rgba(14, 28, 50, 200);
+                border: 1px solid rgba(110, 214, 255, 60);
+                border-radius: 4px;
+                width: 12px;
+            }
+            QScrollBar::handle:vertical {
+                background: rgba(110, 214, 255, 120);
+                border-radius: 6px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: rgba(110, 214, 255, 180);
+            }
+        ''')
+        
+        self.todo_list_container = QtWidgets.QWidget()
+        self.todo_list_layout_inner = QtWidgets.QVBoxLayout(self.todo_list_container)
+        self.todo_list_layout_inner.setContentsMargins(0, 0, 0, 0)
+        self.todo_list_layout_inner.setSpacing(4)
+        
+        self.todo_list_scroll.setWidget(self.todo_list_container)
+        todo_list_layout.addWidget(self.todo_list_scroll)
+        
+        self.display_stack.addWidget(self.todo_list_display)
         
         # 默認顯示圓盤（索引 0）
         self.display_stack.setCurrentIndex(0)
@@ -1660,7 +1797,83 @@ class FinalSageWindow(QtWidgets.QMainWindow):
         """顯示圓盤視圖"""
         self.display_stack.setCurrentIndex(0)  # 顯示圓盤
 
-    def _enter_notice_mode(self):
+    def show_todo_list(self, todo_panel):
+        """顯示待辦清單視圖"""
+        # 清空舊的任務列表
+        while self.todo_list_layout_inner.count():
+            widget = self.todo_list_layout_inner.takeAt(0).widget()
+            if widget:
+                widget.deleteLater()
+        
+        # 獲取篩選後的任務
+        filtered_tasks, filtered_date = todo_panel.get_filtered_tasks_for_display()
+        
+        # 如果有篩選日期，顯示日期標題
+        if filtered_date:
+            date_display_text = todo_panel.get_filtered_date_display_text()
+            date_title = QtWidgets.QLabel(date_display_text if date_display_text else filtered_date)
+            date_title.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+            date_title.setStyleSheet('color: #ffcc00; font-size: 32px; font-weight: bold; margin-bottom: 8px;')
+            date_title.setFont(QtGui.QFont('Microsoft JhengHei', 32, QtGui.QFont.Bold))
+            self.todo_list_layout_inner.addWidget(date_title)
+        
+        # 獲取任務列表並依類型分區顯示：緊急任務在上、常規任務在下
+        status_order = {
+            'in_progress': 0,
+            'pending': 1,
+            'completed': 2,
+        }
+        all_tasks = filtered_tasks
+        urgent_tasks = sorted(
+            [task for task in all_tasks if task.get('type') == todo_panel.TYPE_URGENT],
+            key=lambda task: (
+                status_order.get(task.get('status', 'pending'), 99),
+                task.get('name', '').lower(),
+            )
+        )
+        routine_tasks = sorted(
+            [task for task in all_tasks if task.get('type') == todo_panel.TYPE_ROUTINE],
+            key=lambda task: (
+                status_order.get(task.get('status', 'pending'), 99),
+                task.get('name', '').lower(),
+            )
+        )
+
+        if not all_tasks:
+            # 無任務時的提示
+            if filtered_date:
+                empty_label = QtWidgets.QLabel(f'該日期無任務')
+            else:
+                empty_label = QtWidgets.QLabel('暫無任務\n點擊右側「新增」按鈕建立任務')
+            empty_label.setAlignment(QtCore.Qt.AlignCenter)
+            empty_label.setStyleSheet('color: #8fb5d4; font-size: 24px; padding: 60px;')
+            empty_label.setFont(QtGui.QFont('Microsoft JhengHei', 24))
+            self.todo_list_layout_inner.addWidget(empty_label)
+        else:
+            def add_section(title_text, section_tasks, title_color):
+                if not section_tasks:
+                    return
+
+                section_label = QtWidgets.QLabel(title_text)
+                section_label.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+                section_label.setStyleSheet(f'color: {title_color}; font-size: 28px; font-weight: bold; margin-top: 8px; margin-bottom: 4px;')
+                section_label.setFont(QtGui.QFont('Microsoft JhengHei', 28, QtGui.QFont.Bold))
+                self.todo_list_layout_inner.addWidget(section_label)
+
+                for task in section_tasks:
+                    # 使用新的 TodoItemCard 替代普通 QWidget
+                    item_widget = TodoItemCard(task, todo_panel.STATUS_COLORS, todo_panel, self)
+                    self.todo_list_layout_inner.addWidget(item_widget)
+
+            add_section(todo_panel.TYPE_NAMES[todo_panel.TYPE_URGENT], urgent_tasks, '#ff6464')
+            add_section(todo_panel.TYPE_NAMES[todo_panel.TYPE_ROUTINE], routine_tasks, '#64b4ff')
+        
+        self.todo_list_layout_inner.addStretch()
+        self.display_stack.setCurrentIndex(2)  # 顯示待辦清單
+    
+    def _on_todo_item_clicked(self, task_id, todo_panel):
+        """待辦清單項目被點擊"""
+        todo_panel.select_task_by_id(task_id)
         try:
             # size the diamond to match the main disc
             try:
@@ -1801,7 +2014,8 @@ class MenuSageWindow(QtWidgets.QMainWindow):
         self.editor_stack = QtWidgets.QStackedWidget()
         self.pomodoro_editor = PomodoroPanel(self.controller, compact_mode=self.compact_mode)
         self.editor_stack.addWidget(self.pomodoro_editor)
-        self.editor_stack.addWidget(self._build_placeholder('待辦清單 尚未接上'))
+        self.todo_panel = TodoListPanel(compact_mode=self.compact_mode, main_window=self.main_window)
+        self.editor_stack.addWidget(self.todo_panel)
         self.progress_panel = ProgressTrackerPanel(compact_mode=self.compact_mode)
         self.progress_panel.main_window = self.main_window  # 設置左窗口引用
         self.editor_stack.addWidget(self.progress_panel)
@@ -1867,15 +2081,21 @@ class MenuSageWindow(QtWidgets.QMainWindow):
         self.editor_stack.setCurrentIndex(index)
         hints = [
             '',
-            '待辦清單 尚未接上',
+            '',
             '',
             '行事曆',
         ]
         self.menu_hint.setText(hints[index])
         
-        # 根據選擇的功能切換左窗口的顯示（進度追蹤顯示書架，其他顯示圓盤）
+        # 根據選擇的功能切換左窗口的顯示（進度追蹤顯示書架，待辦清單顯示任務，其他顯示圓盤）
         if self.main_window is not None:
-            if index == 2:
+            if index == 1:
+                # 待辦清單：顯示任務列表
+                try:
+                    self.main_window.show_todo_list(self.todo_panel)
+                except Exception:
+                    pass
+            elif index == 2:
                 # 進度追蹤：顯示書架
                 try:
                     self.main_window.show_bookshelf()
