@@ -1,18 +1,40 @@
 import os
 import json
+import hashlib
 from datetime import datetime, timedelta
 
 from PyQt5 import QtWidgets, QtCore, QtGui, QtMultimedia
 
 
+ACTIVITY_NEON_PALETTE = [
+    QtGui.QColor(0, 255, 200),
+    QtGui.QColor(0, 200, 255),
+    QtGui.QColor(100, 200, 255),
+    QtGui.QColor(0, 230, 200),
+    QtGui.QColor(0, 180, 255),
+    QtGui.QColor(255, 140, 110),
+    QtGui.QColor(255, 200, 90),
+    QtGui.QColor(170, 120, 255),
+    QtGui.QColor(120, 255, 150),
+    QtGui.QColor(255, 110, 190),
+    QtGui.QColor(90, 220, 180),
+    QtGui.QColor(255, 170, 80),
+]
+
 ACTIVITY_NEON_COLORS = {
-    '讀書中': QtGui.QColor(0, 255, 200),
-    '修習中': QtGui.QColor(0, 255, 200),
-    '健身中': QtGui.QColor(0, 200, 255),
-    '休息中': QtGui.QColor(100, 200, 255),
-    '工作中': QtGui.QColor(0, 230, 200),
-    '冥想中': QtGui.QColor(0, 180, 255),
+    '讀書中': ACTIVITY_NEON_PALETTE[0],
+    '修習中': ACTIVITY_NEON_PALETTE[1],
+    '健身中': ACTIVITY_NEON_PALETTE[2],
+    '休息中': ACTIVITY_NEON_PALETTE[3],
+    '工作中': ACTIVITY_NEON_PALETTE[4],
+    '冥想中': ACTIVITY_NEON_PALETTE[5],
+    '測試中': ACTIVITY_NEON_PALETTE[6],
+    '睡覺中': ACTIVITY_NEON_PALETTE[7],
+    '吃飯中': ACTIVITY_NEON_PALETTE[8],
+    '寫作中': ACTIVITY_NEON_PALETTE[9],
 }
+
+_ACTIVITY_COLOR_CACHE = {}
 
 
 def _ui_size(normal_size, compact_size, compact_mode):
@@ -39,7 +61,12 @@ def _scaled(value, scale):
 
 
 def get_neon_color(activity_text):
-    return ACTIVITY_NEON_COLORS.get(activity_text, QtGui.QColor(0, 255, 150))
+    if activity_text in ACTIVITY_NEON_COLORS:
+        return ACTIVITY_NEON_COLORS[activity_text]
+    if activity_text not in _ACTIVITY_COLOR_CACHE:
+        digest = hashlib.sha1(activity_text.encode('utf-8')).digest()
+        _ACTIVITY_COLOR_CACHE[activity_text] = ACTIVITY_NEON_PALETTE[digest[0] % len(ACTIVITY_NEON_PALETTE)]
+    return _ACTIVITY_COLOR_CACHE[activity_text]
 
 
 class DailyPieChart(QtWidgets.QWidget):
