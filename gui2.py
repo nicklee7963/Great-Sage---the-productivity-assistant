@@ -2039,6 +2039,30 @@ class MenuSageWindow(QtWidgets.QMainWindow):
         subtitle.setStyleSheet(f'color: #7fdcff; font-size: {_ui_size(10, 9, compact_mode)}pt; letter-spacing: 3px;')
         overlay_layout.addWidget(subtitle)
 
+        self.menu_scroll = QtWidgets.QScrollArea()
+        self.menu_scroll.setWidgetResizable(True)
+        self.menu_scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.menu_scroll.setStyleSheet('''
+            QScrollArea {
+                background: transparent;
+                border: none;
+            }
+            QScrollBar:vertical {
+                background: rgba(14, 28, 50, 180);
+                border: 1px solid rgba(110, 214, 255, 60);
+                border-radius: 4px;
+                width: 12px;
+            }
+            QScrollBar::handle:vertical {
+                background: rgba(110, 214, 255, 120);
+                border-radius: 6px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: rgba(110, 214, 255, 180);
+            }
+        ''')
+
         self.menu_panel = QtWidgets.QFrame()
         self.menu_panel.setObjectName('menuPanel')
         menu_layout = QtWidgets.QVBoxLayout(self.menu_panel)
@@ -2089,8 +2113,8 @@ class MenuSageWindow(QtWidgets.QMainWindow):
         except Exception:
             pass
 
-        overlay_layout.addWidget(self.menu_panel, stretch=1)
-        overlay_layout.addStretch(1)
+        self.menu_scroll.setWidget(self.menu_panel)
+        overlay_layout.addWidget(self.menu_scroll, stretch=1)
         self.main_layout.addWidget(self.bg, 0, 0)
         self.main_layout.addWidget(overlay, 0, 0)
 
