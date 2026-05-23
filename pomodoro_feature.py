@@ -19,6 +19,25 @@ def _ui_size(normal_size, compact_size, compact_mode):
     return compact_size if compact_mode else normal_size
 
 
+def _screen_geometry():
+    app = QtWidgets.QApplication.instance()
+    if app is not None:
+        screen = app.primaryScreen()
+        if screen is not None:
+            return screen.availableGeometry()
+    return QtCore.QRect(0, 0, 1600, 900)
+
+
+def _screen_scale(compact_mode=False):
+    geometry = _screen_geometry()
+    scale = min(geometry.width() / 1600.0, geometry.height() / 900.0, 1.0)
+    return max(0.62, scale)
+
+
+def _scaled(value, scale):
+    return max(1, int(round(value * scale)))
+
+
 def get_neon_color(activity_text):
     return ACTIVITY_NEON_COLORS.get(activity_text, QtGui.QColor(0, 255, 150))
 
@@ -28,9 +47,13 @@ class DailyPieChart(QtWidgets.QWidget):
     def __init__(self, parent=None, compact_mode=False):
         super().__init__(parent)
         self.compact_mode = compact_mode
+        self.ui_scale = _screen_scale(compact_mode)
         self.data = {}
         self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
-        self.setMinimumSize(540 if compact_mode else 720, 580 if compact_mode else 760)
+        self.setMinimumSize(
+            _scaled(540 if compact_mode else 720, self.ui_scale),
+            _scaled(580 if compact_mode else 760, self.ui_scale),
+        )
         self.setMinimumHeight(100)
         self.current_date = datetime.now().date()
         self.view_mode = 'day'
@@ -123,12 +146,16 @@ class WeeklyStackedBarChart(QtWidgets.QWidget):
     def __init__(self, parent=None, compact_mode=False):
         super().__init__(parent)
         self.compact_mode = compact_mode
+        self.ui_scale = _screen_scale(compact_mode)
         self.data = {}
         self.selected_category = None  # None means show all categories
         self.view_mode = 'week'  # 'week', 'month', or 'year'
         self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
-        self.setMinimumSize(540 if compact_mode else 720, 420 if compact_mode else 520)
-        self.setMinimumHeight(320)
+        self.setMinimumSize(
+            _scaled(540 if compact_mode else 720, self.ui_scale),
+            _scaled(420 if compact_mode else 520, self.ui_scale),
+        )
+        self.setMinimumHeight(_scaled(320, self.ui_scale))
         self.current_date = datetime.now().date()
 
     def set_data(self, activities_data, date=None, view_mode='week'):
@@ -748,6 +775,7 @@ class PomodoroPanel(QtWidgets.QFrame):
     def __init__(self, controller=None, compact_mode=False, parent=None):
         super().__init__(parent)
         self.compact_mode = compact_mode
+        self.ui_scale = _screen_scale(compact_mode)
         self.controller = controller or PomodoroController(self)
         self._add_status_label = '新增...'
         self._status_defaults = ['讀書中', '休息中']
@@ -780,7 +808,7 @@ class PomodoroPanel(QtWidgets.QFrame):
         self.work_input.setRange(0, 180)
         self.work_input.setValue(25)
         self.work_input.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
-        self.work_input.setMinimumHeight(88 if self.compact_mode else 96)
+        self.work_input.setMinimumHeight(_scaled(88 if self.compact_mode else 96, self.ui_scale))
         self.work_input.setStyleSheet(f'font-size: {_ui_size(42, 34, self.compact_mode)}px; font-weight: 700;')
         form.addWidget(self.work_input, 0, 1)
         minute_text = QtWidgets.QLabel('MIN')
@@ -805,7 +833,7 @@ class PomodoroPanel(QtWidgets.QFrame):
             "QPushButton:pressed { background: rgba(0, 200, 255, 150); border: 2px solid rgba(0, 255, 200, 255); }"
         )
         for button in (self.toggle_btn, self.reset_btn):
-            button.setMinimumHeight(100 if self.compact_mode else 112)
+            button.setMinimumHeight(_scaled(100 if self.compact_mode else 112, self.ui_scale))
             button.setStyleSheet(btn_style + btn_hover_pressed)
         btn_row.addWidget(self.toggle_btn)
         btn_row.addWidget(self.reset_btn)
@@ -816,11 +844,14 @@ class PomodoroPanel(QtWidgets.QFrame):
         self.mode_combo = QtWidgets.QComboBox()
         self.mode_combo.addItems(self._status_options)
         self.mode_combo.addItem(self._add_status_label)
-        self.mode_combo.setMinimumHeight(56 if self.compact_mode else 62)
+        self.mode_combo.setMinimumHeight(_scaled(56 if self.compact_mode else 62, self.ui_scale))
         self.mode_combo.setStyleSheet(f'background: rgba(7,16,29,205); color: #effcff; padding: 8px; border-radius: 8px; font-size:{_ui_size(16, 14, self.compact_mode)}px;')
         mode_row.addWidget(self.mode_combo, 1)
         self.mode_delete_btn = QtWidgets.QPushButton('-')
-        self.mode_delete_btn.setFixedSize(56 if self.compact_mode else 62, 56 if self.compact_mode else 62)
+        self.mode_delete_btn.setFixedSize(
+            _scaled(56 if self.compact_mode else 62, self.ui_scale),
+            _scaled(56 if self.compact_mode else 62, self.ui_scale),
+        )
         self.mode_delete_btn.setStyleSheet(f'font-size: {_ui_size(28, 22, self.compact_mode)}px; font-weight: 900; background: rgba(7,16,29,205); border:1px solid rgba(117,220,255,80); color: #e6fbff; border-radius:12px;')
         mode_row.addWidget(self.mode_delete_btn)
         layout.addLayout(mode_row)
@@ -837,28 +868,28 @@ class PomodoroPanel(QtWidgets.QFrame):
             'background: rgba(0,255,150,100); border:2px solid rgba(0,255,150,255); color: #000000; border-radius:12px; }}'
         )
         button = QtWidgets.QPushButton('當天')
-        button.setMinimumHeight(48 if self.compact_mode else 54)
+        button.setMinimumHeight(_scaled(48 if self.compact_mode else 54, self.ui_scale))
         button.setStyleSheet(button_styles_unchecked + '\n' + button_styles_checked)
         button.setCheckable(True)
         button.setChecked(True)
         stats_row.addWidget(button)
         self.stats_buttons.append(button)
         self.week_button = QtWidgets.QPushButton('本週')
-        self.week_button.setMinimumHeight(48 if self.compact_mode else 54)
+        self.week_button.setMinimumHeight(_scaled(48 if self.compact_mode else 54, self.ui_scale))
         self.week_button.setStyleSheet(button_styles_unchecked + '\n' + button_styles_checked)
         self.week_button.setCheckable(True)
         stats_row.addWidget(self.week_button)
         self.stats_buttons.append(self.week_button)
         
         self.month_button = QtWidgets.QPushButton('當月')
-        self.month_button.setMinimumHeight(48 if self.compact_mode else 54)
+        self.month_button.setMinimumHeight(_scaled(48 if self.compact_mode else 54, self.ui_scale))
         self.month_button.setStyleSheet(button_styles_unchecked + '\n' + button_styles_checked)
         self.month_button.setCheckable(True)
         stats_row.addWidget(self.month_button)
         self.stats_buttons.append(self.month_button)
         
         self.year_button = QtWidgets.QPushButton('當年')
-        self.year_button.setMinimumHeight(48 if self.compact_mode else 54)
+        self.year_button.setMinimumHeight(_scaled(48 if self.compact_mode else 54, self.ui_scale))
         self.year_button.setStyleSheet(button_styles_unchecked + '\n' + button_styles_checked)
         self.year_button.setCheckable(True)
         stats_row.addWidget(self.year_button)
@@ -868,8 +899,8 @@ class PomodoroPanel(QtWidgets.QFrame):
         
         # Add category filter combo for weekly view
         self.category_combo = QtWidgets.QComboBox()
-        self.category_combo.setMinimumHeight(48 if self.compact_mode else 54)
-        self.category_combo.setMaximumWidth(200 if self.compact_mode else 240)
+        self.category_combo.setMinimumHeight(_scaled(48 if self.compact_mode else 54, self.ui_scale))
+        self.category_combo.setMaximumWidth(_scaled(200 if self.compact_mode else 240, self.ui_scale))
         self.category_combo.setStyleSheet(f'background: rgba(7,16,29,205); color: #effcff; padding: 8px; border-radius: 8px; font-size:{_ui_size(16, 14, self.compact_mode)}px; border:1px solid rgba(117,220,255,80);')
         self.category_combo.hide()
         stats_row.addWidget(self.category_combo)
@@ -877,7 +908,7 @@ class PomodoroPanel(QtWidgets.QFrame):
 
         self.pie_container = QtWidgets.QFrame()
         self.pie_container.setStyleSheet('background: rgba(7,16,29,180); border: 1px solid rgba(0,255,200,60); border-radius: 12px;')
-        self.pie_container.setMinimumHeight(640 if self.compact_mode else 860)
+        self.pie_container.setMinimumHeight(_scaled(640 if self.compact_mode else 860, self.ui_scale))
         self.pie_container.hide()
         pie_layout = QtWidgets.QVBoxLayout(self.pie_container)
         pie_layout.setContentsMargins(8, 8, 8, 8)
@@ -887,8 +918,8 @@ class PomodoroPanel(QtWidgets.QFrame):
         nav_row.setSpacing(6)
 
         self.date_prev_btn = QtWidgets.QPushButton('◀ 前一天')
-        self.date_prev_btn.setMinimumSize(116 if self.compact_mode else 128, 36)
-        self.date_prev_btn.setMaximumWidth(116 if self.compact_mode else 128)
+        self.date_prev_btn.setMinimumSize(_scaled(116 if self.compact_mode else 128, self.ui_scale), _scaled(36, self.ui_scale))
+        self.date_prev_btn.setMaximumWidth(_scaled(116 if self.compact_mode else 128, self.ui_scale))
         self.date_prev_btn.setFont(QtGui.QFont('Microsoft JhengHei', _ui_size(20, 16, self.compact_mode), QtGui.QFont.Bold))
         self.date_prev_btn.setStyleSheet(f'padding: 5px 12px; font-size: {_ui_size(20, 16, self.compact_mode)}px; font-weight: 700; background: rgba(0,150,255,80); border: 1px solid rgba(0,150,255,150); color: #fff; border-radius: 7px;')
         nav_row.addWidget(self.date_prev_btn)
@@ -899,8 +930,8 @@ class PomodoroPanel(QtWidgets.QFrame):
         nav_row.addWidget(self.date_display, 1)
 
         self.date_next_btn = QtWidgets.QPushButton('後一天 ▶')
-        self.date_next_btn.setMinimumSize(116 if self.compact_mode else 128, 36)
-        self.date_next_btn.setMaximumWidth(116 if self.compact_mode else 128)
+        self.date_next_btn.setMinimumSize(_scaled(116 if self.compact_mode else 128, self.ui_scale), _scaled(36, self.ui_scale))
+        self.date_next_btn.setMaximumWidth(_scaled(116 if self.compact_mode else 128, self.ui_scale))
         self.date_next_btn.setFont(QtGui.QFont('Microsoft JhengHei', _ui_size(20, 16, self.compact_mode), QtGui.QFont.Bold))
         self.date_next_btn.setStyleSheet(f'padding: 5px 12px; font-size: {_ui_size(20, 16, self.compact_mode)}px; font-weight: 700; background: rgba(0,150,255,80); border: 1px solid rgba(0,150,255,150); color: #fff; border-radius: 7px;')
         nav_row.addWidget(self.date_next_btn)
@@ -908,9 +939,9 @@ class PomodoroPanel(QtWidgets.QFrame):
         pie_layout.addLayout(nav_row)
 
         self.daily_pie_chart = DailyPieChart(compact_mode=self.compact_mode)
-        self.daily_pie_chart.setMinimumHeight(560 if self.compact_mode else 820)
+        self.daily_pie_chart.setMinimumHeight(_scaled(560 if self.compact_mode else 820, self.ui_scale))
         self.weekly_bar_chart = WeeklyStackedBarChart(compact_mode=self.compact_mode)
-        self.weekly_bar_chart.setMinimumHeight(560 if self.compact_mode else 820)
+        self.weekly_bar_chart.setMinimumHeight(_scaled(560 if self.compact_mode else 820, self.ui_scale))
         self.chart_stack = QtWidgets.QStackedWidget()
         self.chart_stack.addWidget(self.daily_pie_chart)
         self.chart_stack.addWidget(self.weekly_bar_chart)

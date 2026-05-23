@@ -7,6 +7,25 @@ from datetime import datetime, timedelta, date
 from PyQt5 import QtWidgets, QtCore, QtGui
 
 
+def _screen_geometry():
+    app = QtWidgets.QApplication.instance()
+    if app is not None:
+        screen = app.primaryScreen()
+        if screen is not None:
+            return screen.availableGeometry()
+    return QtCore.QRect(0, 0, 1600, 900)
+
+
+def _screen_scale():
+    geometry = _screen_geometry()
+    scale = min(geometry.width() / 1600.0, geometry.height() / 900.0, 1.0)
+    return max(0.62, scale)
+
+
+def _scaled(value, scale):
+    return max(1, int(round(value * scale)))
+
+
 class ClickableContainer(QtWidgets.QWidget):
     """可點擊的容器 - 處理背景點擊事件"""
     background_clicked = QtCore.pyqtSignal()
@@ -42,6 +61,7 @@ class CalendarWidget(QtWidgets.QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.ui_scale = _screen_scale()
         self.current_date = date.today()
         self.selected_date = None
         self.today = date.today()  # 今天的日期
@@ -53,14 +73,14 @@ class CalendarWidget(QtWidgets.QWidget):
     def _init_ui(self):
         """初始化UI"""
         layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
+        layout.setContentsMargins(_scaled(8, self.ui_scale), _scaled(8, self.ui_scale), _scaled(8, self.ui_scale), _scaled(8, self.ui_scale))
+        layout.setSpacing(_scaled(8, self.ui_scale))
         
         # 月份導航
         nav_layout = QtWidgets.QHBoxLayout()
         
         self.btn_prev = QtWidgets.QPushButton('◀')
-        self.btn_prev.setFixedSize(24, 24)
+        self.btn_prev.setFixedSize(_scaled(24, self.ui_scale), _scaled(24, self.ui_scale))
         self.btn_prev.setStyleSheet('''
             QPushButton {
                 background: rgba(7, 16, 29, 220);
@@ -83,7 +103,7 @@ class CalendarWidget(QtWidgets.QWidget):
         nav_layout.addWidget(self.month_label, stretch=1)
         
         self.btn_next = QtWidgets.QPushButton('▶')
-        self.btn_next.setFixedSize(24, 24)
+        self.btn_next.setFixedSize(_scaled(24, self.ui_scale), _scaled(24, self.ui_scale))
         self.btn_next.setStyleSheet('''
             QPushButton {
                 background: rgba(7, 16, 29, 220);
@@ -104,18 +124,18 @@ class CalendarWidget(QtWidgets.QWidget):
         
         # 星期標題
         weekday_header = QtWidgets.QHBoxLayout()
-        weekday_header.setSpacing(2)
+        weekday_header.setSpacing(_scaled(2, self.ui_scale))
         for weekday in ['一', '二', '三', '四', '五', '六', '日']:
             label = QtWidgets.QLabel(weekday)
             label.setStyleSheet('color: #b0e0ff; font-size: 11px; font-weight: bold;')
             label.setAlignment(QtCore.Qt.AlignCenter)
-            label.setFixedHeight(18)
+            label.setFixedHeight(_scaled(18, self.ui_scale))
             weekday_header.addWidget(label)
         layout.addLayout(weekday_header)
         
         # 日期格子容器
         self.calendar_grid = QtWidgets.QGridLayout()
-        self.calendar_grid.setSpacing(2)
+        self.calendar_grid.setSpacing(_scaled(2, self.ui_scale))
         self.calendar_grid.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(self.calendar_grid)
         
@@ -146,12 +166,12 @@ class CalendarWidget(QtWidgets.QWidget):
                 if day == 0:
                     # 不屬於該月份的日期
                     empty = QtWidgets.QLabel('')
-                    empty.setFixedSize(24, 24)
+                    empty.setFixedSize(_scaled(24, self.ui_scale), _scaled(24, self.ui_scale))
                     self.calendar_grid.addWidget(empty, row, col)
                 else:
                     # 該月份的日期
                     btn = QtWidgets.QPushButton(str(day))
-                    btn.setFixedSize(24, 24)
+                    btn.setFixedSize(_scaled(24, self.ui_scale), _scaled(24, self.ui_scale))
                     btn.setProperty('date', date(year, month, day))
                     
                     # 檢查這一天是否有任務
@@ -456,12 +476,13 @@ class TodoListPanel(QtWidgets.QWidget):
         """建構右側面板 - 編輯面板"""
         panel = QtWidgets.QFrame()
         panel.setStyleSheet('background: rgba(9, 18, 31, 220); border: none; border-radius: 8px;')
-        panel.setMinimumWidth(280)
-        panel.setMaximumWidth(320)
+        self.ui_scale = _screen_scale()
+        panel.setMinimumWidth(_scaled(240, self.ui_scale))
+        panel.setMaximumWidth(_scaled(320, self.ui_scale))
         
         layout = QtWidgets.QVBoxLayout(panel)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
+        layout.setContentsMargins(_scaled(12, self.ui_scale), _scaled(12, self.ui_scale), _scaled(12, self.ui_scale), _scaled(12, self.ui_scale))
+        layout.setSpacing(_scaled(10, self.ui_scale))
         
         # ===== 行事曆區域 =====
         self.calendar = CalendarWidget()
@@ -563,8 +584,8 @@ class TodoListPanel(QtWidgets.QWidget):
             }
         ''')
         self.task_desc_input.setPlaceholderText('輸入任務描述...')
-        self.task_desc_input.setMinimumHeight(80)
-        self.task_desc_input.setMaximumHeight(120)
+        self.task_desc_input.setMinimumHeight(_scaled(72, self.ui_scale))
+        self.task_desc_input.setMaximumHeight(_scaled(120, self.ui_scale))
         layout.addWidget(self.task_desc_input)
 
         # 常規任務的每週日期選擇
@@ -587,7 +608,7 @@ class TodoListPanel(QtWidgets.QWidget):
             button = QtWidgets.QToolButton()
             button.setText(text)
             button.setCheckable(True)
-            button.setFixedSize(34, 34)
+            button.setFixedSize(_scaled(34, self.ui_scale), _scaled(34, self.ui_scale))
             button.setFont(QtGui.QFont('Microsoft JhengHei', 8, QtGui.QFont.Bold))
             button.setStyleSheet('''
                 QToolButton {

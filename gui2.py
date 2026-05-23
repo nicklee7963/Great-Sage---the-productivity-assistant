@@ -47,6 +47,25 @@ def _ui_size(normal_size, compact_size, compact_mode):
     return compact_size if compact_mode else normal_size
 
 
+def _screen_geometry():
+    app = QtWidgets.QApplication.instance()
+    if app is not None:
+        screen = app.primaryScreen()
+        if screen is not None:
+            return screen.availableGeometry()
+    return QtCore.QRect(0, 0, 1600, 900)
+
+
+def _screen_scale(compact_mode=False):
+    geometry = _screen_geometry()
+    scale = min(geometry.width() / 1600.0, geometry.height() / 900.0, 1.0)
+    return max(0.62, scale)
+
+
+def _scaled(value, scale):
+    return max(1, int(round(value * scale)))
+
+
 SAGE_STYLE = """
 QMainWindow, QWidget {
     color: #e6fbff;
@@ -492,10 +511,12 @@ class BookshelfPanel(QtWidgets.QWidget):
     def __init__(self, parent=None, compact_mode=False):
         super().__init__(parent)
         self.compact_mode = compact_mode
+        self.ui_scale = _screen_scale(compact_mode)
         self._data_file = os.path.join(os.path.dirname(__file__), 'progress_records.json')
         self._categories_file = os.path.join(os.path.dirname(__file__), 'book_categories.json')
         self.records = []
         self.categories = []
+        self._last_column_count = None
         
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(12, 12, 12, 12)
@@ -561,6 +582,7 @@ class BookshelfPanel(QtWidgets.QWidget):
         
         # 按字典順序顯示分類
         sorted_categories = sorted(books_by_category.keys())
+        column_count = self._get_column_count()
         
         for category in sorted_categories:
             # 添加分類標題
@@ -572,18 +594,18 @@ class BookshelfPanel(QtWidgets.QWidget):
             books_in_cat = books_by_category[category]
             sorted_books = sorted(books_in_cat, key=lambda r: r.get('title', '').lower())
             
-            # 使用 QGridLayout 實現 4 列布局
+            # 使用 QGridLayout 實現自適應列布局
             grid_widget = QtWidgets.QWidget()
             grid_layout = QtWidgets.QGridLayout(grid_widget)
             grid_layout.setContentsMargins(0, 0, 0, 0)
-            grid_layout.setSpacing(20)
+            grid_layout.setSpacing(_scaled(20, self.ui_scale))
             # 為了讓書籍平均分配在整個視窗，為每一列設定相等的伸縮係數
-            for c in range(4):
+            for c in range(column_count):
                 grid_layout.setColumnStretch(c, 1)
             
             for idx, rec in enumerate(sorted_books):
-                row = idx // 4
-                col = idx % 4
+                row = idx // column_count
+                col = idx % column_count
                 card = BookCard(rec, self)
                 # 將卡片置中於欄位並靠上排列
                 grid_layout.addWidget(card, row, col, alignment=QtCore.Qt.AlignHCenter | QtCore.Qt.AlignTop)
@@ -592,6 +614,20 @@ class BookshelfPanel(QtWidgets.QWidget):
         
         # 添加底部伸縮
         self.shelf_layout.addStretch()
+
+    def _get_column_count(self):
+        available_width = max(1, self.width())
+        card_width = _scaled(200, self.ui_scale)
+        spacing = _scaled(20, self.ui_scale)
+        estimated = max(1, available_width // max(1, card_width + spacing))
+        return max(1, min(4, estimated))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        column_count = self._get_column_count()
+        if column_count != self._last_column_count:
+            self._last_column_count = column_count
+            self.refresh_bookshelf()
 
 
 # ---- Progress Tracker Panel ----
@@ -1117,7 +1153,11 @@ class SageSpeakingDiamond(QtWidgets.QWidget):
     def __init__(self, parent=None, compact_mode=False):
         super().__init__(parent)
         self.compact_mode = compact_mode
-        self.setFixedSize(340 if compact_mode else 360, 340 if compact_mode else 400)
+        self.ui_scale = _screen_scale(compact_mode)
+        self.setFixedSize(
+            _scaled(340 if compact_mode else 360, self.ui_scale),
+            _scaled(340 if compact_mode else 400, self.ui_scale),
+        )
         # no subtitle / typing text per user request
         self.display_text = ""
         self.full_text = ""
@@ -1158,7 +1198,8 @@ class SageNoticeWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('個體名：大賢者 - 專注通知')
-        self.resize(1000, 600)
+        scale = _screen_scale()
+        self.resize(_scaled(1000, scale), _scaled(600, scale))
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
         layout = QtWidgets.QGridLayout(central)
@@ -1175,7 +1216,11 @@ class GreatSageDisc(QtWidgets.QWidget):
     def __init__(self, parent=None, compact_mode=False):
         super().__init__(parent)
         self.compact_mode = compact_mode
-        self.setMinimumSize(640 if compact_mode else 700, 640 if compact_mode else 700)
+        self.ui_scale = _screen_scale(compact_mode)
+        self.setMinimumSize(
+            _scaled(640 if compact_mode else 700, self.ui_scale),
+            _scaled(640 if compact_mode else 700, self.ui_scale),
+        )
         self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         self.remaining_text = '25:00'
         self.progress = 0.0
@@ -1566,8 +1611,9 @@ class FinalSageWindow(QtWidgets.QMainWindow):
     def __init__(self, controller=None, compact_mode=False):
         super().__init__()
         self.compact_mode = compact_mode
+        self.ui_scale = _screen_scale(compact_mode)
         self.setWindowTitle('個體名：大賢者')
-        self.setMinimumSize(560, 560)
+        self.setMinimumSize(_scaled(560, self.ui_scale), _scaled(560, self.ui_scale))
         self.setStyleSheet(SAGE_STYLE)
         self.controller = controller or PomodoroController(self)
 
@@ -1599,7 +1645,10 @@ class FinalSageWindow(QtWidgets.QMainWindow):
         disc_layout.addStretch(1)
         
         self.disc = GreatSageDisc(compact_mode=compact_mode)
-        self.disc.setFixedSize(700 if compact_mode else 760, 700 if compact_mode else 760)
+        self.disc.setFixedSize(
+            _scaled(700 if compact_mode else 760, self.ui_scale),
+            _scaled(700 if compact_mode else 760, self.ui_scale),
+        )
         disc_layout.addWidget(self.disc, alignment=QtCore.Qt.AlignCenter)
         disc_layout.addStretch(1)
         
@@ -1903,10 +1952,11 @@ class FinalSageWindow(QtWidgets.QMainWindow):
         rect = self.centralWidget().rect()
         self.bg.setGeometry(rect)
         self.overlay.setGeometry(rect)
-        target_ratio = 0.74 if self.compact_mode else 0.82
-        disc_min = 480 if self.compact_mode else 520
-        disc_size = min(max(720, int(min(rect.width(), rect.height()) * target_ratio)), min(rect.width(), rect.height()) - 40)
-        disc_size = max(disc_min, disc_size)
+        target_ratio = 0.68 if self.compact_mode else 0.82
+        disc_min = _scaled(420 if self.compact_mode else 520, self.ui_scale)
+        available = max(1, min(rect.width(), rect.height()) - _scaled(40, self.ui_scale))
+        preferred = int(min(rect.width(), rect.height()) * target_ratio)
+        disc_size = max(disc_min, min(preferred, available))
         self.disc.setFixedSize(disc_size, disc_size)
 
     def keyPressEvent(self, event):
@@ -1954,9 +2004,10 @@ class MenuSageWindow(QtWidgets.QMainWindow):
     def __init__(self, controller=None, compact_mode=False, main_window=None):
         super().__init__()
         self.compact_mode = compact_mode
+        self.ui_scale = _screen_scale(compact_mode)
         self.main_window = main_window
         self.setWindowTitle('個體名：大賢者 - 功能選單')
-        self.setMinimumSize(400, 520)  # 盡量保留左右雙窗排版的可用寬度
+        self.setMinimumSize(_scaled(400, self.ui_scale), _scaled(520, self.ui_scale))  # 盡量保留左右雙窗排版的可用寬度
         self.setStyleSheet(SAGE_STYLE)
         self.controller = controller or PomodoroController(self)
 
@@ -1998,7 +2049,7 @@ class MenuSageWindow(QtWidgets.QMainWindow):
         names = ['番茄鐘', '待辦清單', '進度追蹤', '行事曆']
         for index, name in enumerate(names):
             button = QtWidgets.QPushButton(name)
-            button.setMinimumHeight(90 if compact_mode else 100)
+            button.setMinimumHeight(_scaled(90 if compact_mode else 100, self.ui_scale))
             button.setStyleSheet(f'font-size: {_ui_size(22, 18, compact_mode)}px; font-weight: 800;')
             button.setCheckable(True)
             button.clicked.connect(lambda checked=False, i=index: self.set_active(i))
@@ -2053,7 +2104,7 @@ class MenuSageWindow(QtWidgets.QMainWindow):
         alarm_layout.setContentsMargins(16, 16, 16, 16)
         alarm_layout.addStretch(1)
         self.alarm_button = QtWidgets.QPushButton('關閉鬧鐘')
-        self.alarm_button.setMinimumHeight(108 if compact_mode else 120)
+        self.alarm_button.setMinimumHeight(_scaled(108 if compact_mode else 120, self.ui_scale))
         self.alarm_button.setStyleSheet(f"font-size:{_ui_size(28, 22, compact_mode)}px; font-weight:800; background: rgba(7,16,29,205); color:#e6fbff; border-radius:12px;")
         alarm_layout.addWidget(self.alarm_button, alignment=QtCore.Qt.AlignCenter)
         alarm_layout.addStretch(1)

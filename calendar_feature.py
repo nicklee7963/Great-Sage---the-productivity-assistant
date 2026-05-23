@@ -10,6 +10,25 @@ def _ui_size(normal_size, compact_size, compact_mode):
     return compact_size if compact_mode else normal_size
 
 
+def _screen_geometry():
+    app = QtWidgets.QApplication.instance()
+    if app is not None:
+        screen = app.primaryScreen()
+        if screen is not None:
+            return screen.availableGeometry()
+    return QtCore.QRect(0, 0, 1600, 900)
+
+
+def _screen_scale(compact_mode=False):
+    geometry = _screen_geometry()
+    scale = min(geometry.width() / 1600.0, geometry.height() / 900.0, 1.0)
+    return max(0.62, scale)
+
+
+def _scaled(value, scale):
+    return max(1, int(round(value * scale)))
+
+
 class CalendarEventStore:
     def __init__(self, storage_path=None):
         self.storage_path = storage_path or os.path.join(os.path.dirname(__file__), 'calendar_events.json')
@@ -123,12 +142,13 @@ class CalendarPanel(QtWidgets.QFrame):
     def __init__(self, compact_mode=False, parent=None):
         super().__init__(parent)
         self.compact_mode = compact_mode
+        self.ui_scale = _screen_scale(compact_mode)
         self.store = CalendarEventStore()
         today = datetime.now().date()
         self._current_date = today.replace(day=1)
         self._selected_date = today
         self._build_ui()
-        self.setMinimumHeight(920 if compact_mode else 1120)
+        self.setMinimumHeight(_scaled(920 if compact_mode else 1120, self.ui_scale))
         self.refresh_month(self._current_date)
         self.show_month_view(emit_signal=False)
 
@@ -166,8 +186,8 @@ class CalendarPanel(QtWidgets.QFrame):
         )
 
         root_layout = QtWidgets.QVBoxLayout(self)
-        root_layout.setContentsMargins(16, 16, 16, 16)
-        root_layout.setSpacing(12)
+        root_layout.setContentsMargins(_scaled(16, self.ui_scale), _scaled(16, self.ui_scale), _scaled(16, self.ui_scale), _scaled(16, self.ui_scale))
+        root_layout.setSpacing(_scaled(12, self.ui_scale))
 
         self.title_label = QtWidgets.QLabel('行事曆')
         self.title_label.setAlignment(QtCore.Qt.AlignCenter)
@@ -197,9 +217,9 @@ class CalendarPanel(QtWidgets.QFrame):
         layout.setSpacing(10)
 
         nav_row = QtWidgets.QHBoxLayout()
-        nav_row.setSpacing(8)
+        nav_row.setSpacing(_scaled(8, self.ui_scale))
         self.month_prev_btn = QtWidgets.QPushButton('◀')
-        self.month_prev_btn.setFixedWidth(42 if self.compact_mode else 48)
+        self.month_prev_btn.setFixedWidth(_scaled(42 if self.compact_mode else 48, self.ui_scale))
         self.month_prev_btn.clicked.connect(self._go_previous_month)
         nav_row.addWidget(self.month_prev_btn)
 
@@ -209,7 +229,7 @@ class CalendarPanel(QtWidgets.QFrame):
         nav_row.addWidget(self.month_label, 1)
 
         self.month_next_btn = QtWidgets.QPushButton('▶')
-        self.month_next_btn.setFixedWidth(42 if self.compact_mode else 48)
+        self.month_next_btn.setFixedWidth(_scaled(42 if self.compact_mode else 48, self.ui_scale))
         self.month_next_btn.clicked.connect(self._go_next_month)
         nav_row.addWidget(self.month_next_btn)
         layout.addLayout(nav_row)
@@ -223,8 +243,8 @@ class CalendarPanel(QtWidgets.QFrame):
             "}"
         )
         grid_layout = QtWidgets.QGridLayout(self.grid_frame)
-        grid_layout.setContentsMargins(8, 8, 8, 8)
-        grid_layout.setSpacing(6)
+        grid_layout.setContentsMargins(_scaled(8, self.ui_scale), _scaled(8, self.ui_scale), _scaled(8, self.ui_scale), _scaled(8, self.ui_scale))
+        grid_layout.setSpacing(_scaled(6, self.ui_scale))
 
         weekday_names = ['日', '一', '二', '三', '四', '五', '六']
         for column, name in enumerate(weekday_names):
@@ -239,7 +259,7 @@ class CalendarPanel(QtWidgets.QFrame):
                 " font-weight: 700;"
                 "}"
             )
-            header.setMinimumHeight(34 if self.compact_mode else 40)
+            header.setMinimumHeight(_scaled(34 if self.compact_mode else 40, self.ui_scale))
             header.setFont(QtGui.QFont('Microsoft JhengHei', 10 if self.compact_mode else 12, QtGui.QFont.Bold))
             grid_layout.addWidget(header, 0, column)
 
@@ -250,7 +270,7 @@ class CalendarPanel(QtWidgets.QFrame):
                 button = QtWidgets.QPushButton('')
                 button.setFont(button_font)
                 button.setCursor(QtCore.Qt.PointingHandCursor)
-                button.setMinimumHeight(96 if self.compact_mode else 128)
+                button.setMinimumHeight(_scaled(96 if self.compact_mode else 128, self.ui_scale))
                 button.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
                 button.setProperty('dayValue', 0)
                 button.clicked.connect(lambda checked=False, b=button: self._on_day_clicked(b))
@@ -265,9 +285,9 @@ class CalendarPanel(QtWidgets.QFrame):
         layout.setSpacing(10)
 
         top_row = QtWidgets.QHBoxLayout()
-        top_row.setSpacing(8)
+        top_row.setSpacing(_scaled(8, self.ui_scale))
         self.back_button = QtWidgets.QPushButton('← 回上頁')
-        self.back_button.setMinimumHeight(40 if self.compact_mode else 44)
+        self.back_button.setMinimumHeight(_scaled(40 if self.compact_mode else 44, self.ui_scale))
         self.back_button.clicked.connect(self._on_back_clicked)
         top_row.addWidget(self.back_button, 0, QtCore.Qt.AlignLeft)
 
@@ -284,7 +304,7 @@ class CalendarPanel(QtWidgets.QFrame):
             f"background: rgba(9,18,31,230); border: 1px solid rgba(117,220,255,60); border-radius: 12px;"
             f"color: #effcff; font-size: {_ui_size(14, 11, self.compact_mode)}pt; font-weight: 700; padding: 12px;"
         )
-        self.summary_label.setMinimumHeight(120 if self.compact_mode else 140)
+        self.summary_label.setMinimumHeight(_scaled(120 if self.compact_mode else 140, self.ui_scale))
         layout.addWidget(self.summary_label)
 
         editor_frame = QtWidgets.QFrame()
@@ -317,7 +337,7 @@ class CalendarPanel(QtWidgets.QFrame):
         self.time_edit = QtWidgets.QTimeEdit(QtCore.QTime.currentTime())
         self.time_edit.setDisplayFormat('HH:mm')
         self.time_edit.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
-        self.time_edit.setMinimumHeight(38 if self.compact_mode else 42)
+        self.time_edit.setMinimumHeight(_scaled(38 if self.compact_mode else 42, self.ui_scale))
         form.addWidget(self.time_edit, 0, 1)
 
         task_label = QtWidgets.QLabel('要做什麼')
@@ -325,7 +345,7 @@ class CalendarPanel(QtWidgets.QFrame):
         form.addWidget(task_label, 1, 0)
         self.task_edit = QtWidgets.QLineEdit()
         self.task_edit.setPlaceholderText('例如：起床、上廁所、讀書')
-        self.task_edit.setMinimumHeight(38 if self.compact_mode else 42)
+        self.task_edit.setMinimumHeight(_scaled(38 if self.compact_mode else 42, self.ui_scale))
         form.addWidget(self.task_edit, 1, 1)
         form.setColumnStretch(0, 0)
         form.setColumnStretch(1, 1)
@@ -337,7 +357,7 @@ class CalendarPanel(QtWidgets.QFrame):
         self.update_btn = QtWidgets.QPushButton('更新')
         self.delete_btn = QtWidgets.QPushButton('移除')
         for button in (self.add_btn, self.update_btn, self.delete_btn):
-            button.setMinimumHeight(40 if self.compact_mode else 44)
+            button.setMinimumHeight(_scaled(40 if self.compact_mode else 44, self.ui_scale))
             button_row.addWidget(button)
         editor_layout.addLayout(button_row)
 
