@@ -1,3 +1,13 @@
+"""
+大賢者（Great Sage）- 寵物聊天模組
+
+本模組提供 AI 聊天功能，使用 Google Gemini API：
+  • 自動從書單、行事曆獲取上下文
+  • 生成自然、温暖的寵物對話
+  • 背景執行緒避免阻斷 GUI
+  • 定期主動與使用者互動
+"""
+
 import html
 import json
 import os

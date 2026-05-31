@@ -1,9 +1,22 @@
+"""
+大賢者（Great Sage）- 桌面寵物啟動程式
+
+本檔案啟動可愛的桌面寵物，它會在你的桌面上行走、
+點擊時會打開生產力工具 GUI，並能透過 Gemini API 與你進行有趣的對話。
+
+功能：
+  • 桌面動畫寵物（從 assets/walk/ 載入行走素材）
+  • 點擊寵物打開生產力 GUI
+  • AI 聊天功能（需要 Gemini API 金鑰）
+"""
+
 import os
 import random
 import sys
 
 from PyQt5 import QtWidgets, QtGui, QtCore
 from pet_chat_feature import create_pet_chat_feature, resolve_gemini_api_key
+from line_reminder import create_line_reminder
 
 
 class ClickableBubbleLabel(QtWidgets.QLabel):
@@ -391,6 +404,23 @@ if __name__ == '__main__':
         w.chat_feature = create_pet_chat_feature(w, controller, api_key=api_key)
     except Exception:
         w.chat_feature = None
+    
+    # 初始化 Line Bot 行事曆提醒
+    line_reminder = None
+    try:
+        import json
+        settings_file = os.path.join(os.path.dirname(__file__), 'pet_settings.json')
+        if os.path.isfile(settings_file):
+            with open(settings_file, 'r', encoding='utf-8') as f:
+                settings = json.load(f)
+                line_token = settings.get('line_channel_access_token')
+                line_user_id = settings.get('line_user_id')
+                if line_token and line_user_id:
+                    line_reminder = create_line_reminder(line_token, line_user_id)
+                    line_reminder.start()
+                    print("[Main] Line Bot 行事曆提醒已啟動")
+    except Exception as e:
+        print(f"[Main] Line Bot 提醒初始化失敗: {e}")
     # ensure pet can receive shortcuts/focus
     try:
         w.setFocusPolicy(QtCore.Qt.StrongFocus)
@@ -429,5 +459,16 @@ if __name__ == '__main__':
         controller.alarmStopped.connect(lambda: state.update({'alarm_active': False, 'gui_visible': True}))
     except Exception:
         pass
+    
+    # 設定應用退出時的清理
+    def on_app_exit():
+        if line_reminder:
+            try:
+                line_reminder.stop()
+            except Exception:
+                pass
+    
+    app.aboutToQuit.connect(on_app_exit)
+    
     w.show()
     sys.exit(app.exec_())
