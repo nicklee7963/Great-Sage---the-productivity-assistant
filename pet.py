@@ -1,17 +1,43 @@
-import sys
 import os
 import random
+import sys
+
 from PyQt5 import QtWidgets, QtGui, QtCore
+from pet_chat_feature import create_pet_chat_feature, resolve_gemini_api_key
+
+
+class ClickableBubbleLabel(QtWidgets.QLabel):
+    clicked = QtCore.pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMouseTracking(True)
+
+    def mousePressEvent(self, event):
+        if event.button() == QtCore.Qt.LeftButton:
+            self.clicked.emit()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == QtCore.Qt.LeftButton:
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
 
 
 class PetWindow(QtWidgets.QLabel):
+    hoverStateChanged = QtCore.pyqtSignal(bool)
+    moved = QtCore.pyqtSignal()
+
     def __init__(self, assets_dir, on_click=None, size=(120, 120), controller=None):
         super().__init__()
         self.assets_dir = assets_dir
         self.on_click = on_click
         self.controller = controller
         self.width_fixed, self.height_fixed = size
-        self.timer_text = '沒有計時器'
+        self.timer_text = '點我跟我聊天'
 
         # load frames from assets_dir (expecting 1.jpg,2.jpg...)
         self.frames = []
@@ -68,11 +94,16 @@ class PetWindow(QtWidgets.QLabel):
         self.setFixedSize(self.width_fixed, self.height_fixed)
         self.setWindowFlags(QtCore.Qt.FramelessWindowHint | QtCore.Qt.WindowStaysOnTopHint | QtCore.Qt.Tool)
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
+        self.setMouseTracking(True)
 
         screen = QtWidgets.QApplication.primaryScreen().availableGeometry()
         x = random.randint(0, max(0, screen.width() - self.width()))
         y = random.randint(0, max(0, screen.height() - self.height()))
         self.move(x, y)
+        try:
+            self.moved.emit()
+        except Exception:
+            pass
 
         # movement
         self.vx = random.choice([-4, -3, 3, 4])
@@ -91,17 +122,19 @@ class PetWindow(QtWidgets.QLabel):
         self.facing_left = False
 
         # hover bubble that follows the pet
-        self.bubble = QtWidgets.QLabel(None)
-        self.bubble.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
+        self.bubble = ClickableBubbleLabel(None)
         self.bubble.setWindowFlags(QtCore.Qt.FramelessWindowHint | QtCore.Qt.ToolTip)
         self.bubble.setStyleSheet(
             'QLabel { background: rgba(18, 18, 24, 230); color: #f6fbff; border: 1px solid rgba(170, 230, 255, 160); '
             'border-radius: 12px; padding: 8px 12px; font-size: 14px; font-weight: 700; }'
         )
-        self.bubble.setText('沒有計時器')
+        self.bubble.setText(self.timer_text)
         self.bubble.adjustSize()
+        self.bubble.clicked.connect(self._open_chat_from_bubble)
         self.bubble.hide()
         self.hover_padding = 90
+        self._hovered = False
+        self._hover_pause_active = False
 
         self.hover_timer = QtCore.QTimer(self)
         self.hover_timer.timeout.connect(self._sync_hover_bubble)
@@ -113,27 +146,56 @@ class PetWindow(QtWidgets.QLabel):
             except Exception:
                 pass
 
+    def enterEvent(self, event):
+        try:
+            self.hoverStateChanged.emit(True)
+        except Exception:
+            pass
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        try:
+            self.hoverStateChanged.emit(False)
+        except Exception:
+            pass
+        super().leaveEvent(event)
+
     def _on_timer_updated(self, remaining_seconds, progress, running, activity_text):
-        self.timer_text = f'{remaining_seconds // 60:02d}:{remaining_seconds % 60:02d}' if running else '沒有計時器'
         if self.bubble.isVisible():
             self._update_bubble()
 
     def _update_bubble(self):
-        self.bubble.setText(self.timer_text if self.timer_text else '沒有計時器')
+        self.bubble.setText(self.timer_text if self.timer_text else '點我跟我聊天')
         self.bubble.adjustSize()
-        global_pos = self.mapToGlobal(QtCore.QPoint(self.width() + 14, -8))
-        screen = QtWidgets.QApplication.screenAt(global_pos) or QtWidgets.QApplication.primaryScreen()
-        if screen is not None:
-            screen_geo = screen.availableGeometry()
-            bx = global_pos.x()
-            by = global_pos.y()
-            if bx + self.bubble.width() > screen_geo.right():
-                bx = max(screen_geo.left(), self.mapToGlobal(QtCore.QPoint(-self.bubble.width() - 14, -8)).x())
-            if by + self.bubble.height() > screen_geo.bottom():
-                by = max(screen_geo.top(), self.mapToGlobal(QtCore.QPoint(self.width() + 14, self.height() - self.bubble.height())).y())
-            self.bubble.move(bx, by)
+        pet_geo = self.frameGeometry()
+        screen = QtWidgets.QApplication.screenAt(pet_geo.center()) or QtWidgets.QApplication.primaryScreen()
+        if screen is None:
+            self.bubble.move(self.mapToGlobal(QtCore.QPoint(self.width() + 14, -8)))
+            return
+
+        screen_geo = screen.availableGeometry()
+        margin = 10
+        gap = 14
+        max_width = max(160, screen_geo.width() - margin * 2)
+        if self.bubble.width() > max_width:
+            self.bubble.setFixedWidth(max_width)
+            self.bubble.adjustSize()
+
+        bubble_w = self.bubble.width()
+        bubble_h = self.bubble.height()
+        right_x = pet_geo.right() + gap
+        left_x = pet_geo.left() - bubble_w - gap
+
+        if right_x + bubble_w <= screen_geo.right() - margin:
+            bx = right_x
+        elif left_x >= screen_geo.left() + margin:
+            bx = left_x
         else:
-            self.bubble.move(global_pos)
+            bx = min(max(screen_geo.left() + margin, right_x), screen_geo.right() - bubble_w - margin)
+
+        by = pet_geo.top() - 8
+        by = min(max(screen_geo.top() + margin, by), screen_geo.bottom() - bubble_h - margin)
+        self.bubble.move(bx, by)
 
     def _cursor_near_pet(self):
         cursor_pos = QtGui.QCursor.pos()
@@ -142,13 +204,52 @@ class PetWindow(QtWidgets.QLabel):
 
     def _sync_hover_bubble(self):
         if not self.isVisible():
+            if self._hover_pause_active:
+                self._hover_pause_active = False
+                try:
+                    if not self.move_timer.isActive():
+                        self.move_timer.start(40)
+                    if not self.frame_timer.isActive():
+                        self.frame_timer.start(150)
+                except Exception:
+                    pass
+            if self._hovered:
+                self._hovered = False
+                try:
+                    self.hoverStateChanged.emit(False)
+                except Exception:
+                    pass
             self.bubble.hide()
             return
-        if self._cursor_near_pet():
+        hovered = self._cursor_near_pet()
+        if hovered != self._hovered:
+            self._hovered = hovered
+            try:
+                self.hoverStateChanged.emit(hovered)
+            except Exception:
+                pass
+
+        if hovered:
+            if not self._hover_pause_active:
+                self._hover_pause_active = True
+                try:
+                    self.move_timer.stop()
+                    self.frame_timer.stop()
+                except Exception:
+                    pass
             self._update_bubble()
             self.bubble.show()
             self.bubble.raise_()
         else:
+            if self._hover_pause_active:
+                self._hover_pause_active = False
+                try:
+                    if not self.move_timer.isActive():
+                        self.move_timer.start(40)
+                    if not self.frame_timer.isActive():
+                        self.frame_timer.start(150)
+                except Exception:
+                    pass
             self.bubble.hide()
 
     def mousePressEvent(self, event):
@@ -199,6 +300,25 @@ class PetWindow(QtWidgets.QLabel):
                 self.setPixmap(self.frames[self.frame_index])
         if self.bubble.isVisible():
             self._update_bubble()
+
+    def _open_chat_from_bubble(self):
+        try:
+            self.bubble.hide()
+        except Exception:
+            pass
+        
+        chat_feature = getattr(self, 'chat_feature', None)
+        if chat_feature is not None:
+            try:
+                if hasattr(chat_feature, 'open_chat_dialog'):
+                    chat_feature.open_chat_dialog()
+            except Exception as e:
+                pass
+        
+        try:
+            self.moved.emit()
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':
@@ -266,6 +386,11 @@ if __name__ == '__main__':
         _on_open_gui()
 
     w = PetWindow(assets_dir, on_click=open_gui, size=(120, 120), controller=controller)
+    try:
+        api_key = resolve_gemini_api_key(prompt_if_missing=False)
+        w.chat_feature = create_pet_chat_feature(w, controller, api_key=api_key)
+    except Exception:
+        w.chat_feature = None
     # ensure pet can receive shortcuts/focus
     try:
         w.setFocusPolicy(QtCore.Qt.StrongFocus)
